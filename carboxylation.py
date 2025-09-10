@@ -17,4 +17,5 @@ fileID = '/home/alpal/projects/methanCapture/carboxylationProblem/db/simah.db'
 xyzList = functions.getXYZstructureList(fileID)
 XYZobjects = [objects.xyzStructure(xyzString) for xyzString in xyzList]
 
-XYZobjects[0].viewInPymol()
+
+

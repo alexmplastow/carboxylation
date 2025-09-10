@@ -1,6 +1,8 @@
 import sqlite3
 import pandas as pd
 import json
+import math
+from collections import defaultdict
 
 def getPandasDFfromDB(pathToDBfile):
 	#My friend Murat wrote these two lines, I have no idea what the squlite3 routine is doing
@@ -19,4 +21,90 @@ def getXYZstructureList(pathToDBfile):
 			print(f"Error processing row {index}: {e}")
 			optimized_xyz_list.append(None)
 	return optimized_xyz_list
+
+
+#Written by Murat (but probably by chatGPT or Gemini)
+def parse_xyz(xyz_text):
+	"""
+	Parse an XYZ string into a list of (symbol, (x,y,z)).
+	Works whether the file has:
+	  - no header
+	  - atom count only
+	  - atom count + (optional) comment line (possibly empty)
+	"""
+	raw_lines = xyz_text.splitlines()
+	# keep empty lines to detect presence/absence of comment line properly
+	lines = [l.rstrip("\n") for l in raw_lines]
+
+	# Trim leading/trailing blank lines for robustness
+	while lines and not lines[0].strip():
+		lines.pop(0)
+	while lines and not lines[-1].strip():
+		lines.pop()
+
+	start = 0
+	if lines:
+		first = lines[0].strip()
+		try:
+			nat = int(first)
+			# If there is a second line and it *doesn't* look like an atom line,
+			# treat it as a comment and skip it; otherwise, assume no comment.
+			if len(lines) >= 2:
+				parts = lines[1].split()
+				if len(parts) < 4 or not parts[0].isalpha():
+					start = 2  # count + comment
+				else:
+					start = 1  # count only (no comment line)
+			else:
+				start = 1
+		except ValueError:
+			start = 0
+
+	atoms = []
+	for line in lines[start:]:
+		if not line.strip():
+			continue
+		parts = line.split()
+		if len(parts) < 4:
+			continue
+		sym = parts[0]
+		try:
+			x, y, z = map(float, parts[1:4])
+		except ValueError:
+			continue
+		atoms.append((sym, (x, y, z)))
+	return atoms
+
+def dist(a, b):
+    return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+
+def bonded(sym_i, sym_j, d, scale=1.25, metal_fudge=0.20):
+	"""
+	Heuristic bond criterion:
+	  d <= scale * (r_i + r_j) + (metal_fudge if either is a metal like Ni)
+	"""
+	base = scale * (rcov(sym_i) + rcov(sym_j))
+	extra = metal_fudge if (sym_i.lower() in ("ni",) or sym_j.lower() in ("ni",)) else 0.0
+	return d <= (base + extra)
+
+COVALENT_RADII = {
+    "H": 0.31, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57,
+    "Ni": 1.24,  # approximate
+    # add more if needed
+}
+
+def rcov(sym):
+	return COVALENT_RADII.get(sym.capitalize(), 0.76)
+
+def build_connectivity(symbols, positions, scale=1.25, metal_fudge=0.20):
+	"""Return adjacency list inferred from distances."""
+	n = len(symbols)
+	adj = defaultdict(set)
+	for i in range(n):
+		for j in range(i+1, n):
+			d = dist(positions[i], positions[j])
+			if bonded(symbols[i], symbols[j], d, scale=scale, metal_fudge=metal_fudge):
+				adj[i].add(j)
+				adj[j].add(i)
+	return adj
 
