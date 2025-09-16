@@ -5,6 +5,8 @@ import subprocess
 import os
 import numpy as np
 
+#Add a routine for adding the pentane ring to the molecule of interest
+
 class atom:
 	def __init__(self, atomString):
 		self.atomString = atomString
@@ -15,6 +17,14 @@ class atom:
 class xyzStructure:
 	def __init__(self, xyzString):
 		self.xyzString = xyzString
+		lines = xyzString.split("\n")
+		self.atomCount = int(lines[0])
+		self.atoms = lines[2:]
+
+	def printToFile(self, xyzPath):
+		file = open(xyzPath, "a")
+		file.write(self.xyzString)
+		file.close()
 
 	def viewInVMD(self):
 		# Courtesy of chatGPT
@@ -77,7 +87,7 @@ class xyzStructure:
 
 			return C1, C2
 
-#Write a method to pluck a specific atom index from your XYZ files
+#Write a method to pluck a specific atom index from your XYZ files
 
 	def findX1_andX2nearNickelRs(self, particleType="c"):
 		C1_i, C2_i = self.findX1_andX2nearNickelIndices(particleType=particleType)
@@ -90,4 +100,44 @@ class xyzStructure:
 
 		return C1_r, C2_r
 
+	#TODO: add function for attaching the carboxylate to the metal
+	def addCarboxylate(self, carboxylate):
+		self.carboxylate = carboxylate
 
+		self.atomCount+=3
+		self.atoms = self.atoms + 
+				[carboxylate.O1line + "\n", 
+				carboxylate.O2line + "\n", 
+				carboxylate.Cline + "\n"]
+		self.xyzString = self.atomCount + "\n" + self.atoms
+		print(xyzString)
+
+
+
+
+		
+		
+class carboxylate:
+	def __init__(self, xyzPath = "/home/alpal/projects/methanCapture/carboxylationProblem/data/carboxylate.xyz"):
+		self.xyzPath = xyzPath
+		parsedXYZ = functions.parse_xyz(open(self.xyzPath, "r").read())
+		self.O1 = parsedXYZ[0]
+		self.O2 = parsedXYZ[1]
+		self.C = parsedXYZ[2]
+		
+		self.r_O1 = np.array(self.O1[-1])
+		self.r_O2 = np.array(self.O2[-1])
+		self.r_C = np.array(self.C[-1])
+		
+		self.O1line = f"{self.O1[0]} {self.r_O1[0]} {self.r_O1[1]} {self.r_O1[2]}"
+		self.O1line = f"{self.O2[0]} {self.r_O2[0]} {self.r_O2[1]} {self.r_O2[2]}"
+		self.Cline = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}"
+	#def putInPlaneOf_MetalAlkyne(self, xyzObject):
+		
+
+
+
+		
+	
+
+	
