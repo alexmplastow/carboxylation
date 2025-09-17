@@ -5,13 +5,15 @@ import subprocess
 import os
 import numpy as np
 
+
+
 #Add a routine for adding the pentane ring to the molecule of interest
 
 class atom:
 	def __init__(self, atomString):
 		self.atomString = atomString
 		self.element = self.atomString.split(" ")[0]
-		self.r = np.array(self.atomString.split(" ")[1:])
+		self.r = np.array(self.atomString.split(" ")[1:], dtype = np.float32)
 
 
 class xyzStructure:
@@ -19,7 +21,7 @@ class xyzStructure:
 		self.xyzString = xyzString
 		lines = xyzString.split("\n")
 		self.atomCount = int(lines[0])
-		self.atoms = lines[2:]
+		self.atoms = [ln.strip() for ln in lines[2:] if ln.strip()]
 
 	def printToFile(self, xyzPath):
 		file = open(xyzPath, "a")
@@ -89,6 +91,7 @@ class xyzStructure:
 
 #Write a method to pluck a specific atom index from your XYZ files
 
+	#NOTE: maybe rename this one in the event that you switch metal types
 	def findX1_andX2nearNickelRs(self, particleType="c"):
 		C1_i, C2_i = self.findX1_andX2nearNickelIndices(particleType=particleType)
 
@@ -99,22 +102,28 @@ class xyzStructure:
 		C2_r = C2.r
 
 		return C1_r, C2_r
+	def findNickelR(self):
+		metalAtom_index = [i for i, atomLine in enumerate(self.atoms) 
+					if "Ni" in atomLine][0]
+		metalAtom = self.returnAtomByIndex(metalAtom_index)
+		Ni_r = metalAtom.r
+		return Ni_r
 
 	#TODO: add function for attaching the carboxylate to the metal
 	def addCarboxylate(self, carboxylate):
 		self.carboxylate = carboxylate
 
 		self.atomCount+=3
-		self.atoms = self.atoms + 
-				[carboxylate.O1line + "\n", 
-				carboxylate.O2line + "\n", 
-				carboxylate.Cline + "\n"]
-		self.xyzString = self.atomCount + "\n" + self.atoms
-		print(xyzString)
+
+		self.atoms = 	self.atoms + \
+				[carboxylate.O1line,
+				carboxylate.O2line, 
+				carboxylate.Cline]
+
+		self.xyzString = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atoms)
 
 
-
-
+#TODO: clean up the redefining of lines a bit, this is what functions are made for
 		
 		
 class carboxylate:
@@ -129,15 +138,71 @@ class carboxylate:
 		self.r_O2 = np.array(self.O2[-1])
 		self.r_C = np.array(self.C[-1])
 		
-		self.O1line = f"{self.O1[0]} {self.r_O1[0]} {self.r_O1[1]} {self.r_O1[2]}"
-		self.O1line = f"{self.O2[0]} {self.r_O2[0]} {self.r_O2[1]} {self.r_O2[2]}"
-		self.Cline = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}"
-	#def putInPlaneOf_MetalAlkyne(self, xyzObject):
+		self.O1line = f"{self.O1[0]} {self.r_O1[0]} {self.r_O1[1]} {self.r_O1[2]}\n"
+		#Note: I changed this line on 9/17/25
+		self.O2line = f"{self.O2[0]} {self.r_O2[0]} {self.r_O2[1]} {self.r_O2[2]}\n"
+		self.Cline = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}\n"
+
+
+	#Note: courtesy of chatGPT
+	def putInPlaneOf_MetalAlkyne(self, xyzObject):
+		src_pts = np.vstack([self.r_O1, self.r_O2, self.r_C])
+
+		C1_r, C2_r = xyzObject.findX1_andX2nearNickelRs()
+		Ni_r = xyzObject.findNickelR()
+
+		dst_pts = np.vstack([np.array(C1_r), np.array(C2_r), np.array(Ni_r)])
+
+		R, t = functions.rigid_transform(src_pts, dst_pts)
+
+		# Apply
+		self.r_O1 = R @ self.r_O1 + t
+		self.r_O2 = R @ self.r_O2 + t
+		self.r_C  = R @ self.r_C  + t
+
+		# Update lines (if you want to write back to xyz)
+		self.O1line = f"{self.O1[0]} {self.r_O1[0]} {self.r_O1[1]} {self.r_O1[2]}\n"
+		self.O2line = f"{self.O2[0]} {self.r_O2[0]} {self.r_O2[1]} {self.r_O2[2]}\n"
+		self.Cline  = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}\n"
+
+	def printToXYZ(self, xyzPath):
+		self.xyzString = "3\n\n" + self.O1line + self.O2line + self.Cline
+		file = open(xyzPath, "a")
+		file.write(self.xyzString)
+		file.close()
+	
+	#NOTE: while I technically do not need the entire molecule just to rotate
+		#NOTE: the carboxylate 
+	def rotateAboutC(self, xyzObject, angle):
+
+		C1_r, C2_r = xyzObject.findX1_andX2nearNickelRs()
+		Ni_r = xyzObject.findNickelR()
+
+		cross = functions.findCrossProduct(Ni_r, C1_r, C2_r)
+
+		rotatedPoints = functions.rotatePointsAboutCrossProduct(
+					[self.r_O1, self.r_O2, self.r_C],
+					cross,
+					angle,
+					pivot_index = -1)
+
+		self.r_O1 = rotatedPoints[0]
+		self.r_O2 = rotatedPoints[1]
+		self.r_C = rotatedPoints[2]
+
+		self.O1line = f"{self.O1[0]} {self.r_O1[0]} {self.r_O1[1]} {self.r_O1[2]}\n"
+		self.O2line = f"{self.O2[0]} {self.r_O2[0]} {self.r_O2[1]} {self.r_O2[2]}\n"
+		self.Cline  = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}\n"
+
+
+
 		
 
 
 
-		
-	
 
-	
+		
+		
+
+
+

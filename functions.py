@@ -3,6 +3,7 @@ import pandas as pd
 import json
 import math
 from collections import defaultdict
+import numpy as np
 
 def getPandasDFfromDB(pathToDBfile):
 	#My friend Murat wrote these two lines, I have no idea what the squlite3 routine is doing
@@ -108,3 +109,53 @@ def build_connectivity(symbols, positions, scale=1.25, metal_fudge=0.20):
 				adj[j].add(i)
 	return adj
 
+
+#Courtesy of chatGPT
+def rigid_transform(src_pts, dst_pts):
+	"""
+	Compute rigid transform that aligns src_pts to dst_pts.
+	Each is a (3,3) array with rows as points.
+	"""
+	src_centroid = np.mean(src_pts, axis=0)
+	dst_centroid = np.mean(dst_pts, axis=0)
+
+	# Center
+	src_centered = src_pts - src_centroid
+	dst_centered = dst_pts - dst_centroid
+
+	# Rotation via SVD (Kabsch algorithm)
+	H = src_centered.T @ dst_centered
+	U, S, Vt = np.linalg.svd(H)
+	R = Vt.T @ U.T
+	if np.linalg.det(R) < 0:
+		Vt[-1, :] *= -1
+		R = Vt.T @ U.T
+
+	# Translation
+	t = dst_centroid - R @ src_centroid
+	return R, t
+
+def findCrossProduct(q1, q2, q3):
+	v1 = q3 - q1
+	v2 = q2 - q1
+	cross = np.cross(v1, v2)
+	return cross/np.linalg.norm(cross)
+
+#Note: based on rodrigues' rotation formula
+def rotatePointsAboutCrossProduct(points, cross, angle, pivot_index=0):
+
+    pivot = points[pivot_index]
+    shifted = points - pivot
+
+    K = np.array([
+        [0, -cross[2], cross[1]],
+        [cross[2], 0, -cross[0]],
+        [-cross[1], cross[0], 0]
+    ])
+
+    R = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+
+    rotated_shifted = shifted @ R.T
+    rotated = rotated_shifted + pivot
+
+    return rotated
