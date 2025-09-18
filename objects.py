@@ -5,7 +5,14 @@ import subprocess
 import os
 import numpy as np
 
+from ase.io import read
+from ase.neighborlist import NeighborList, natural_cutoffs
 
+#TODO: add a method for fishing out bond lengths from the example structure you constructed in gaussview
+#TODO: but there is no reason you can't put them in their own data structure
+#TODO: add a method for distancing C1 and C2 from one another
+#TODO: add a method to the carboxylate method for fixing bond lengths
+#TODO: add a method for paritionioning R groups from the xyz file
 
 #Add a routine for adding the pentane ring to the molecule of interest
 
@@ -122,6 +129,85 @@ class xyzStructure:
 
 		self.xyzString = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atoms)
 
+	#Note: I am not 100% sure this code will generalize well
+	def getRGroupIndices(self, index = 1):
+
+		if index == 1:
+
+			C1_i, C2_i = self.findX1_andX2nearNickelIndices()
+
+			R_C = self.returnAtomByIndex(C1_i)
+			R_C_i = C1_i
+			R_C_j = C2_i
+
+		elif index == 2:
+
+			C1_i, C2_i = self.findX1_andX2nearNickelIndices()
+
+			R_C = self.returnAtomByIndex(C2_i)
+			R_C_i = C2_i
+			R_C_j = C1_i
+		else:
+			print("You had to pick 1 or 2 as the input, was that so hard?")
+			raise Exception("Bruh")
+		
+		#TODO: MAKE SURE TO DELETE THIS FILE WHEN YOU ARE DONE
+		self.printToFile("tmp.xyz")
+
+
+		atoms = read("tmp.xyz")
+		cutoffs = natural_cutoffs(atoms)
+		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
+		nl.update(atoms)	
+		indices, _ = nl.get_neighbors(R_C_i)
+		indices = [int(index) for index in list(indices)]
+		R_indices = [int(index) for index in indices if index != R_C_j and index != 0]
+		R_indices.append(R_C_i)
+		checkedR_indices = [R_C_i]
+
+		while R_indices != checkedR_indices:
+			R_indices = sorted(R_indices)
+			checkedR_indices = sorted(checkedR_indices)
+			
+			for R_index in R_indices:
+				if R_index not in checkedR_indices:
+					neighborIndices, _ = nl.get_neighbors(R_index)
+					
+					checkedR_indices.append(int(R_index))
+
+					for neighborIndex in neighborIndices:
+						if neighborIndex not in R_indices:
+							R_indices.append(int(neighborIndex))
+
+				else:
+					continue
+		os.remove("tmp.xyz")
+
+
+		return R_indices
+
+	def getRGroup(self, index = 1, deleteRgroupFromXYZ = True):
+		R_indices = self.getRGroupIndices(index = index)
+		R_xyz = [self.atoms[i] for i in R_indices]
+		if deleteRgroupFromXYZ == True:
+			self.atoms = [self.atoms[i] for i in 
+					range(0,len(self.atoms)) 
+					if i not in R_indices]
+			self.atomCount = str(int(self.atomCount) - len(R_indices))
+			#Making a change to the xyz string
+			self.xyzString = self.atomCount + "\n" + "\n" + "\n".join(self.atoms)
+		return Rgroup(R_indices, R_xyz)
+
+			
+
+class Rgroup:
+	def __init__(self, R_indices, R_xyz):
+		self.R_indices = R_indices
+		#Note: this attribute contains some lines from the xyz file
+			#Note: it does not contain all the information needed for a .xyz
+		self.R_xyz = R_xyz
+		
+	
 
 #TODO: clean up the redefining of lines a bit, this is what functions are made for
 		
@@ -195,9 +281,10 @@ class carboxylate:
 		self.Cline  = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}\n"
 
 
+#TODO: add a method to the xyzStructure for identifying the indices of those atoms which are attached to C1 and C2 (this could be a headache..... I'll probably need a molecular graphics software to guess bonds for me
 
-		
-
+#TODO: add an R1andR2 object for handling rotation operations and such
+	#TODO: it is best if you can add these as attributes to the xyzStructure
 
 
 

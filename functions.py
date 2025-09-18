@@ -159,3 +159,10 @@ def rotatePointsAboutCrossProduct(points, cross, angle, pivot_index=0):
     rotated = rotated_shifted + pivot
 
     return rotated
+
+#      C1==C2
+#     /      \
+#   C5        C3
+#     \      /
+#        C4
+
