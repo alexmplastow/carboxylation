@@ -17,16 +17,11 @@ fileID = '/home/alpal/projects/methanCapture/carboxylationProblem/db/simah.db'
 xyzList = functions.getXYZstructureList(fileID)
 XYZobjects = [objects.xyzStructure(xyzString) for xyzString in xyzList]
 
+fiveMemberedRingInstance = objects.fiveMemberedRing()
+
 testXYZ = XYZobjects[0]
+testXYZ.constructRingIntermediate(fiveMemberedRingInstance)
 
-carboxylateInstance = objects.carboxylate()
-carboxylateInstance.putInPlaneOf_MetalAlkyne(testXYZ)
-carboxylateInstance.printToXYZ("carboxylateTest.xyz")
-
-carboxylateInstance.rotateAboutC(testXYZ, angle = 30)
-
-carboxylateInstance.printToXYZ("carboxylateTest_rotation.xyz")
-
-
-
+testXYZ.printToFile("ringTest.xyz")
+#testXYZ.viewInVMD()
 

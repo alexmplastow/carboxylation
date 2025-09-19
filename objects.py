@@ -8,27 +8,42 @@ import numpy as np
 from ase.io import read
 from ase.neighborlist import NeighborList, natural_cutoffs
 
-#TODO: add a method for fishing out bond lengths from the example structure you constructed in gaussview
-#TODO: but there is no reason you can't put them in their own data structure
-#TODO: add a method for distancing C1 and C2 from one another
-#TODO: add a method to the carboxylate method for fixing bond lengths
-#TODO: add a method for paritionioning R groups from the xyz file
-
 #Add a routine for adding the pentane ring to the molecule of interest
+
+#TODO: battle test this code by adding the five member ring
 
 class atom:
 	def __init__(self, atomString):
 		self.atomString = atomString
 		self.element = self.atomString.split(" ")[0]
-		self.r = np.array(self.atomString.split(" ")[1:], dtype = np.float32)
+		self.r = np.array([part for part in self.atomString.split(" ")[1:] 
+					if part != ''], dtype = np.float32)
+	#NOTE: changing the r attribute does not directly change the representative string
+	def updateString(self):
+		self.atomString = f"{self.element} {self.r[0]} {self.r[1]} {self.r[2]}"
+
+	def translate(self, translationVector):
+		self.r += translationVector
+		self.atomString = f"{self.element} {self.r[0]} {self.r[1]} {self.r[2]}"
 
 
+#TODO: rename the atoms attribute, it makes your code confusing
 class xyzStructure:
 	def __init__(self, xyzString):
 		self.xyzString = xyzString
 		lines = xyzString.split("\n")
 		self.atomCount = int(lines[0])
-		self.atoms = [ln.strip() for ln in lines[2:] if ln.strip()]
+		self.atomLines = [ln.strip() for ln in lines[2:] if ln.strip()]
+		self.atoms = [atom(atomLine) for atomLine in self.atomLines]
+
+	#NOTE: assumes the atoms attribute has been set correctly
+		#Fixes the xyz string while its at it
+	#NOTE: as such, I've forced the atoms attribute to be a manual input
+	def regenerateAtomLines(self, atoms):
+		self.atomCount = len(atoms)
+		self.atomLines = [atom.atomString for atom in atoms]
+		self.xyzString = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atomLines)
+
 
 	def printToFile(self, xyzPath):
 		file = open(xyzPath, "a")
@@ -49,8 +64,12 @@ class xyzStructure:
                 		os.remove(tmp_path)
 
 	def returnAtomByIndex(self, i):
-		atomLines = [line for line in self.xyzString.split("\n") 
-				if len(line.split(" ")) == 4]
+		atomLines = []
+		for line in self.xyzString.split("\n"):
+			parts = line.split(" ")
+			parts = [part for part in parts if part != '']
+			if len(parts) == 4:
+				atomLines.append(line)
 		return atom(atomLines[i])
 
 	def findX1_andX2nearNickelIndices(self, prefer_two_shortest=True, scale=1.25, metal_fudge=0.20, particleType="c"):
@@ -110,7 +129,7 @@ class xyzStructure:
 
 		return C1_r, C2_r
 	def findNickelR(self):
-		metalAtom_index = [i for i, atomLine in enumerate(self.atoms) 
+		metalAtom_index = [i for i, atomLine in enumerate(self.atomLines) 
 					if "Ni" in atomLine][0]
 		metalAtom = self.returnAtomByIndex(metalAtom_index)
 		Ni_r = metalAtom.r
@@ -122,12 +141,12 @@ class xyzStructure:
 
 		self.atomCount+=3
 
-		self.atoms = 	self.atoms + \
+		self.atomLines = self.atomLines + \
 				[carboxylate.O1line,
 				carboxylate.O2line, 
 				carboxylate.Cline]
 
-		self.xyzString = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atoms)
+		self.xyzString = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atomLines)
 
 	#Note: I am not 100% sure this code will generalize well
 	def getRGroupIndices(self, index = 1):
@@ -187,31 +206,237 @@ class xyzStructure:
 		return R_indices
 
 	def getRGroup(self, index = 1, deleteRgroupFromXYZ = True):
+		
+		C1_r, C2_r = self.findX1_andX2nearNickelRs()
+		if index == 1:
+			C_r = C1_r
+		elif index == 2:
+			C_r = C2_r
+
 		R_indices = self.getRGroupIndices(index = index)
-		R_xyz = [self.atoms[i] for i in R_indices]
+		#Note: I changed this from a list, it is probs fine
+		R_xyz = "\n".join([self.atomLines[i] for i in R_indices])
 		if deleteRgroupFromXYZ == True:
-			self.atoms = [self.atoms[i] for i in 
-					range(0,len(self.atoms)) 
+			self.atomLines = [self.atomLines[i] for i in 
+					range(0,len(self.atomLines)) 
 					if i not in R_indices]
 			self.atomCount = str(int(self.atomCount) - len(R_indices))
 			#Making a change to the xyz string
-			self.xyzString = self.atomCount + "\n" + "\n" + "\n".join(self.atoms)
-		return Rgroup(R_indices, R_xyz)
+			self.xyzString = self.atomCount + "\n" + "\n" + "\n".join(self.atomLines)
+		return Rgroup(R_indices, R_xyz, C_r)
 
-			
+	def deleteRgroups(self):
+		R1_indices = self.getRGroupIndices(index = 1)
+		R2_indices = self.getRGroupIndices(index = 2)
+
+		R_indices = R1_indices + R2_indices
+
+		self.atomLines = [self.atomLines[i] for i in 
+					range(0,len(self.atomLines)) 
+					if i not in R_indices]
+
+		self.atoms = [atom(self.atomLines[i]) for i in 
+					range(0,len(self.atomLines)) 
+					if i not in R_indices]
+
+
+		self.atomCount = str(int(self.atomCount) - len(R_indices))
+		self.xyzString = self.atomCount + "\n" + "\n" + "\n".join(self.atomLines)
+
+
+	#TODO: this function still needs tested
+	#NOTE: I may not actually need it
+	def changeC1C2distance(self, fiveMemberedRing):
+		#Find the midpoint between the two carbons
+
+		C1_index, C2_index = self.findX1_andX2nearNickelIndices()
+		C1_r, C2_r = self.findX1_andX2nearNickelRs()
+		m = self.findAtomByIndex(C1_index, C2_index)
+
+		#Use that to define the direction of their unit vector
+		C1_m_uv = functions.unitVector(C1_r, m)
+		C2_m_uv = functions.unitVector(C2_r, m)
+
+		#Grab their respective R groups
+		R1 = getRGroup(index = 1, deleteRgroupFromXYZ = False)
+		R2 = getRGroup(index = 2, deleteRgroupFromXYZ = False)
+
+		#Delete the respectives indices from the xyzString
+		self.deleteRgroups()		
+
+		#Grab the new distance, which I am assuming is from the five membered ring
+		newD = fiveMemberedRing.d_C1C2
+
+		#Translate both R groups by the (newDistance - oldDistance)/2
+		oldD = self.findAtom_AtomDistance(C1_index, C2_index)
+
+		dD = (newD - oldD)/2
+
+		R1.translate(dB * C1_m_uv)
+		R2.translate(dB * C2_m_uv)
+
+		#I need to add the R groups back to the xyzString
+		self.xyzString += R1.R_xyz
+		self.xyzString += R2.R_xyz
+
+		#Redefining the atomLines attribute
+		lines = xyzString.split("\n")
+		self.atomLines = [ln.strip() for ln in lines[2:] if ln.strip()]
+		
+		
+	def findAtom_AtomDistance(self, atom1Index, atom2Index):
+		
+		atom1 = self.returnAtomByIndex(atom1Index)
+		atom2 = self.returnAtomByIndex(atom2Index)
+
+		d = np.linalg.norm(atom1.r - atom2.r)
+		return d
+
+	def findAtom_AtomMidpoint(self, atom1Index, atom2Index):
+
+		atom1 = self.returnAtomByIndex(atom1Index)
+		atom2 = self.returnAtomByIndex(atom2Index)
+
+		m = (atom1.r + atom2.r)/2
+		return m
+
+	#  
+	#          O1
+	#       /      \
+	#  O2=C3        Ni
+	#       \      /
+	#        C1==C2
+	#       /      \
+	#    R1/R2    R2/R1
+	#
+
+
+	def constructRingIntermediate(self, fiveMemberedRingInstance):
+		
+		#🟡 Looks a little shabby, but not wrong
+		#fiveMemberedRingInstance.putInPlaneOf_MetalAlkyne(xyzObject = self)
+		
+		#Add the carboxylate atoms to the xyz string/atom objects
+		#NOTE: this is the sanity check
+		
+		#🟢
+		#Just take the R1 and R2 groups, get their translation vectors first
+		C1_index, C2_index = self.findX1_andX2nearNickelIndices()
+		C1_r, C2_r = self.findX1_andX2nearNickelRs()
+
+		#🟢
+		#Add a routine for translating C1 and its R group
+		R1 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
+		R2 = self.getRGroup(index = 2, deleteRgroupFromXYZ = False)
+	
+		#🟢
+		fmr_C1_r = fiveMemberedRingInstance.C1atom.r
+		fmr_C2_r = fiveMemberedRingInstance.C2atom.r
+
+		'''
+		#🟡 
+		#NOTE: I may have this backwards
+		C1TranslationVector = fmr_C1_r - C1_r
+		C2TranslationVector = fmr_C2_r - C2_r
+		'''
+
+		#🟢
+		#Removing the R groups for translating
+		self.deleteRgroups()
+	
+		'''
+		#🟡 
+		#Now, do the translation
+		R1.translate(C1TranslationVector)
+		R2.translate(C1TranslationVector)
+		'''
+		
+		
+		#NOTE: I'm not all that optimistic that this will work (I basically have a cluster
+			#NOTE: of points, but it's not so clear whether the orientation will be
+			#NOTE: positive or negative
+
+		'''
+		#🟡 
+		#Get the orientation of the hydrogen (use the unit vector)
+		fmr_C1_H1 = functions.orientVector(np.stack([fiveMemberedRingInstance.C1atom.r,
+								fiveMemberedRingInstance.R1atom.r]))
+
+		fmr_C2_H2 = functions.orientVector(np.stack([fiveMemberedRingInstance.C2atom.r,
+								fiveMemberedRingInstance.R2atom.r]))
+
+		#🟡 
+		#Reorient the R group accoringly
+		origin_1 = fiveMemberedRingInstance.C1atom.r
+		R1.reorientRgroup(origin_1, fmr_C1_H1)
+		
+		origin_2 = fiveMemberedRingInstance.C2atom.r
+		R1.reorientRgroup(origin_2, fmr_C2_H2)
+		'''
+
+		'''
+		#🟢
+		#Now, reinstall the R group to the xyz file
+		for atom in R1.atoms:
+			self.atoms.append(atom)
+
+		for atom in R2.atoms:
+			self.atoms.append(atom)
+
+		'''
+
+		#🟡 Looks a little shabby, but not wrong
+		self.atoms.append(fiveMemberedRingInstance.O1atom)
+		self.atoms.append(fiveMemberedRingInstance.C3atom)
+		self.atoms.append(fiveMemberedRingInstance.O2atom)
+
+		#Just putting this here for debugging
+		self.atoms.append(fiveMemberedRingInstance.C1atom)
+		self.atoms.append(fiveMemberedRingInstance.C2atom)
+		self.atoms.append(fiveMemberedRingInstance.R1atom)
+		self.atoms.append(fiveMemberedRingInstance.R2atom)
+
+		self.regenerateAtomLines(self.atoms)
 
 class Rgroup:
-	def __init__(self, R_indices, R_xyz):
+	def __init__(self, R_indices, R_xyz, C_r):
 		self.R_indices = R_indices
+		self.R_xyz = R_xyz
 		#Note: this attribute contains some lines from the xyz file
 			#Note: it does not contain all the information needed for a .xyz
-		self.R_xyz = R_xyz
+		self.atoms = [atom(line) for line in self.R_xyz.split("\n")]
+		self.atomLines = [line for line in self.R_xyz.split("\n")]
 		
-	
+		self.C_r = C_r
+		self.origin = C_r
 
+	def translate(self, vectorOfTranslation):
+		self.R_xyz = ''
+		for atom in self.atoms:
+			atom.translate(vectorOfTranslation)
+			self.R_xyz += f"{atom.atomString}\n"
+	#NOTE: this code has not been tested
+	def getRgroupOrientation(self):
+		atomR = [atom.r for atom in self.atoms]
+		points = np.vstack(atomR)
+		u = functions.orientVector(points)
+		return u
+
+	def reorientRgroup(self, origin, newOrientation):
+		R_P = np.stack([atom.r for atom in self.atoms])
+		#Note: this returns non-type figure out why
+		R_u = self.getRgroupOrientation()
+
+		points_1 = functions.rotatePoints(R_P, origin, R_u, newOrientation)
+		for atom, point in zip(self.atoms, points_1):
+			atom.r = point
+
+
+		
+		
+		
 #TODO: clean up the redefining of lines a bit, this is what functions are made for
-		
-		
+			
 class carboxylate:
 	def __init__(self, xyzPath = "/home/alpal/projects/methanCapture/carboxylationProblem/data/carboxylate.xyz"):
 		self.xyzPath = xyzPath
@@ -280,16 +505,105 @@ class carboxylate:
 		self.O2line = f"{self.O2[0]} {self.r_O2[0]} {self.r_O2[1]} {self.r_O2[2]}\n"
 		self.Cline  = f"{self.C[0]} {self.r_C[0]} {self.r_C[1]} {self.r_C[2]}\n"
 
+#  
+#          O1
+#       /      \
+#  O2=C3        Ni
+#       \      /
+#        C1==C2
+#       /      \
+#    R1/R2    R2/R1
+#
+
+        
+class fiveMemberedRing:
+	def __init__(self, pathToXYZfile = "/home/alpal/projects/methanCapture/carboxylationProblem/data/carboxylatedExample.xyz"):
+
+		xyzStructureString = open(pathToXYZfile).read()
+		xyzStructureInstance = xyzStructure(xyzStructureString)
+
+                        
+		self.O1Index = 26
+		self.C3Index = 21
+		self.O2Index = 27
+		self.C1Index = 22
+		self.C2Index = 20
+		self.NiIndex = 25
+		self.R1Index = 24
+		self.R2Index = 23
+        
+		self.d_O1C3 = xyzStructureInstance.findAtom_AtomDistance(self.O1Index, self.C3Index)
+		self.d_C3O2 = xyzStructureInstance.findAtom_AtomDistance(self.C3Index, self.O2Index)
+		self.d_C3C1 = xyzStructureInstance.findAtom_AtomDistance(self.C3Index, self.C1Index)
+		self.d_C1C2 = xyzStructureInstance.findAtom_AtomDistance(self.C1Index, self.C2Index)
+		self.d_C2Ni = xyzStructureInstance.findAtom_AtomDistance(self.C2Index, self.NiIndex)
+		self.d_NiO1 = xyzStructureInstance.findAtom_AtomDistance(self.NiIndex, self.O1Index)
+
+		self.O1atom = xyzStructureInstance.returnAtomByIndex(self.O1Index)
+		self.C3atom = xyzStructureInstance.returnAtomByIndex(self.C3Index)
+		self.O2atom = xyzStructureInstance.returnAtomByIndex(self.O2Index)
+		self.C1atom = xyzStructureInstance.returnAtomByIndex(self.C1Index)
+		self.C2atom = xyzStructureInstance.returnAtomByIndex(self.C2Index)
+		self.Niatom = xyzStructureInstance.returnAtomByIndex(self.NiIndex)
+
+		self.R1atom = xyzStructureInstance.returnAtomByIndex(self.R1Index)
+		self.R2atom = xyzStructureInstance.returnAtomByIndex(self.R2Index)
+
+
+
+	#NOTE: this function is untested
+	#NOTE: this function will give me the points, but it will not place atoms in my xyzObject
+		#NOTE: instance
+	#NOTE: I think this should enforce sane geometries on its own
+		#NOTE: I can only verify after adding
+	
+	def putInPlaneOf_MetalAlkyne(self, xyzObject):
+		src_pts = np.vstack([self.O1atom.r, self.Niatom.r, self.C2atom.r])
+
+		C1_r, C2_r = xyzObject.findX1_andX2nearNickelRs()
+		Ni_r = xyzObject.findNickelR()
+
+		dst_pts = np.vstack([np.array(C1_r), np.array(Ni_r), np.array(C2_r)])
+
+		R, t = functions.rigid_transform(src_pts, dst_pts)
+
+		# Apply
+		self.O1atom.r = R @ self.O1atom.r + t
+		self.C3atom.r = R @ self.C3atom.r + t
+		self.O2atom.r = R @ self.O2atom.r + t
+		self.C1atom.r = R @ self.C1atom.r + t
+		self.C2atom.r = R @ self.C2atom.r + t
+		self.Niatom.r = R @ self.Niatom.r + t
+
+		#Update the strings
+		self.O1atom.updateString()
+		self.C3atom.updateString()
+		self.O2atom.updateString()
+		self.C2atom.updateString()
+		self.Niatom.updateString()
+
+
+
+		
+		
+
 
 #TODO: add a method to the xyzStructure for identifying the indices of those atoms which are attached to C1 and C2 (this could be a headache..... I'll probably need a molecular graphics software to guess bonds for me
 
 #TODO: add an R1andR2 object for handling rotation operations and such
 	#TODO: it is best if you can add these as attributes to the xyzStructure
 
+#TODO: add a method for paritionioning R groups from the xyz file
 
+#TODO: add a method for fishing out bond lengths from the example structure you constructed in gaussview
 
-		
-		
+#TODO: add a method for putting the five member ring in the plane of the metal alkyne
+#TODO: add a method for distancing C1 and C2 from one another
+#TODO: add a method to the carboxylate method for fixing bond lengths
+#TODO: add a method to the carboxylate for adding a hydrogen when you configure it to handle detachment
+	#TODO: from nickel
+#TODO: add a method for finding the angles between two atoms to handle rotations
 
-
+#TODO: for whatever reason, the fiveMember ring attributes are not
+			#TODO: refelecting the transformation
 

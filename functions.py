@@ -4,6 +4,7 @@ import json
 import math
 from collections import defaultdict
 import numpy as np
+import objects
 
 def getPandasDFfromDB(pathToDBfile):
 	#My friend Murat wrote these two lines, I have no idea what the squlite3 routine is doing
@@ -160,9 +161,82 @@ def rotatePointsAboutCrossProduct(points, cross, angle, pivot_index=0):
 
     return rotated
 
-#      C1==C2
-#     /      \
-#   C5        C3
-#     \      /
-#        C4
+def unitVector(point1, point2):
+    v = np.array(point2) - np.array(point1)
+    return v / np.linalg.norm(v)
+
+#Courtesy of chatGPT
+def orientVector(points):
+    """
+    Given an array of 3D points (shape: N x 3), return
+    the dominant orientation as a unit vector.
+    """
+    # Subtract centroid to center the data
+    centroid = np.mean(points, axis=0)
+    centered = points - centroid
+
+    # Covariance matrix
+    cov = np.cov(centered.T)
+
+    # Eigen decomposition
+    eigvals, eigvecs = np.linalg.eig(cov)
+
+    # Pick eigenvector with largest eigenvalue
+    principal_axis = eigvecs[:, np.argmax(eigvals)]
+
+    # Normalize to unit vector
+    unit_vec = principal_axis / np.linalg.norm(principal_axis)
+
+    return unit_vec
+
+#Courtesy of chatGPT
+def rotatePoints(points, origin, u, v):
+    """
+    Rotate a set of 3D points so that orientation vector u aligns with v.
+
+    Parameters
+    ----------
+    points : (N, 3) array
+        3D coordinates of points
+    origin : (3,) array
+        The origin about which to rotate
+    u, v : (3,) arrays
+        Unit vectors: current orientation and target orientation
+
+    Returns
+    -------
+    rotated_points : (N, 3) array
+    """
+    u = u / np.linalg.norm(u)
+    v = v / np.linalg.norm(v)
+
+    # Check if vectors are parallel
+    if np.allclose(u, v):
+        return points.copy()
+    if np.allclose(u, -v):
+        # Rotate 180° around any axis perpendicular to u
+        perp = np.array([1,0,0]) if abs(u[0]) < 0.9 else np.array([0,1,0])
+        k = np.cross(u, perp)
+        k /= np.linalg.norm(k)
+        theta = np.pi
+    else:
+        k = np.cross(u, v)
+        k /= np.linalg.norm(k)
+        theta = np.arccos(np.dot(u, v))
+
+    # Rodrigues rotation formula
+    K = np.array([
+        [0, -k[2], k[1]],
+        [k[2], 0, -k[0]],
+        [-k[1], k[0], 0]
+    ])
+    R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+
+    # Apply rotation
+    shifted = points - origin
+    rotated = shifted @ R.T
+    return rotated + origin
+
+	
+
 
