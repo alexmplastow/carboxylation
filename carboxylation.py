@@ -22,6 +22,7 @@ fiveMemberedRingInstance = objects.fiveMemberedRing()
 testXYZ = XYZobjects[0]
 testXYZ.constructRingIntermediate(fiveMemberedRingInstance)
 
+#testXYZ.printToFile("ringlessTest.xyz")
 testXYZ.printToFile("ringTest.xyz")
 #testXYZ.viewInVMD()
 

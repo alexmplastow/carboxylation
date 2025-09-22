@@ -189,6 +189,79 @@ def orientVector(points):
 
     return unit_vec
 
+def rotation_matrix(axis, angle):
+    """
+    Rodrigues' rotation formula for 3D rotation matrix.
+    """
+    K = np.array([
+        [0, -axis[2], axis[1]],
+        [axis[2], 0, -axis[0]],
+        [-axis[1], axis[0], 0]
+    ])
+    I = np.eye(3)
+    return I + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+
+
+def reorient_points(points, origin, current_dir, target_dir):
+    """
+    Rotate a set of points so that `current_dir` aligns with `target_dir`.
+
+    Parameters
+    ----------
+    points : (N,3) array-like
+        The set of 3D points to transform.
+    origin : (3,) array-like
+        The origin point (remains fixed during transformation).
+    current_dir : (3,) array-like
+        Unit vector giving current orientation of the point set.
+    target_dir : (3,) array-like
+        Unit vector giving desired orientation of the point set.
+
+    Returns
+    -------
+    transformed_points : (N,3) ndarray
+        The reoriented set of points.
+    """
+
+    points = np.array(points, dtype=float)
+    origin = np.array(origin, dtype=float)
+    u = np.array(current_dir, dtype=float)
+    v = np.array(target_dir, dtype=float)
+
+    # Normalize to be safe
+    u /= np.linalg.norm(u)
+    v /= np.linalg.norm(v)
+
+    # Compute rotation axis (cross product) and angle
+    axis = np.cross(u, v)
+    axis_norm = np.linalg.norm(axis)
+
+    if axis_norm < 1e-10:
+        # u and v are parallel (or antiparallel)
+        if np.dot(u, v) > 0:
+            R = np.eye(3)  # no rotation needed
+        else:
+            # 180° rotation: choose any orthogonal axis
+            axis = np.array([1.0, 0.0, 0.0])
+            if np.abs(u[0]) > 0.9:  # avoid collinearity
+                axis = np.array([0.0, 1.0, 0.0])
+            axis = axis - np.dot(axis, u) * u
+            axis /= np.linalg.norm(axis)
+            angle = np.pi
+            R = rotation_matrix(axis, angle)
+    else:
+        axis /= axis_norm
+        angle = np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))
+        R = rotation_matrix(axis, angle)
+
+    # Apply rotation about the origin
+    shifted_points = points - origin
+    rotated_points = shifted_points @ R.T
+    transformed_points = rotated_points + origin
+
+    return transformed_points
+
+'''
 #Courtesy of chatGPT
 def rotatePoints(points, origin, u, v):
     """
@@ -237,6 +310,4 @@ def rotatePoints(points, origin, u, v):
     rotated = shifted @ R.T
     return rotated + origin
 
-	
-
-
+'''

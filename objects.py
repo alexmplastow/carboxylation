@@ -314,11 +314,10 @@ class xyzStructure:
 	def constructRingIntermediate(self, fiveMemberedRingInstance):
 		
 		#🟡 Looks a little shabby, but not wrong
-		#fiveMemberedRingInstance.putInPlaneOf_MetalAlkyne(xyzObject = self)
+		fiveMemberedRingInstance.putInPlaneOf_MetalAlkyne(xyzObject = self)
 		
 		#Add the carboxylate atoms to the xyz string/atom objects
 		#NOTE: this is the sanity check
-		
 		#🟢
 		#Just take the R1 and R2 groups, get their translation vectors first
 		C1_index, C2_index = self.findX1_andX2nearNickelIndices()
@@ -329,52 +328,38 @@ class xyzStructure:
 		R1 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
 		R2 = self.getRGroup(index = 2, deleteRgroupFromXYZ = False)
 	
+	
 		#🟢
 		fmr_C1_r = fiveMemberedRingInstance.C1atom.r
 		fmr_C2_r = fiveMemberedRingInstance.C2atom.r
 
-		'''
-		#🟡 
-		#NOTE: I may have this backwards
+		
+		#🟢
 		C1TranslationVector = fmr_C1_r - C1_r
-		C2TranslationVector = fmr_C2_r - C2_r
-		'''
-
+		C2TranslationVector = fmr_C2_r - C2_r		
+		
 		#🟢
 		#Removing the R groups for translating
 		self.deleteRgroups()
 	
-		'''
-		#🟡 
+		#🟢
 		#Now, do the translation
 		R1.translate(C1TranslationVector)
-		R2.translate(C1TranslationVector)
-		'''
+		R2.translate(C2TranslationVector)
 		
-		
-		#NOTE: I'm not all that optimistic that this will work (I basically have a cluster
-			#NOTE: of points, but it's not so clear whether the orientation will be
-			#NOTE: positive or negative
+		#🟢
+		#Note, the orientation of the unit vectors produced here are sane
+		fmr_C1_H1 = functions.unitVector(fiveMemberedRingInstance.C1atom.r, 
+						fiveMemberedRingInstance.R1atom.r)
 
-		'''
-		#🟡 
-		#Get the orientation of the hydrogen (use the unit vector)
-		fmr_C1_H1 = functions.orientVector(np.stack([fiveMemberedRingInstance.C1atom.r,
-								fiveMemberedRingInstance.R1atom.r]))
+		fmr_C2_H2 = functions.unitVector(fiveMemberedRingInstance.C2atom.r, 
+						fiveMemberedRingInstance.R2atom.r)
 
-		fmr_C2_H2 = functions.orientVector(np.stack([fiveMemberedRingInstance.C2atom.r,
-								fiveMemberedRingInstance.R2atom.r]))
 
-		#🟡 
-		#Reorient the R group accoringly
-		origin_1 = fiveMemberedRingInstance.C1atom.r
-		R1.reorientRgroup(origin_1, fmr_C1_H1)
-		
-		origin_2 = fiveMemberedRingInstance.C2atom.r
-		R1.reorientRgroup(origin_2, fmr_C2_H2)
-		'''
+		#🟢
+		R1.reorientRgroup(fmr_C1_H1)
+		R2.reorientRgroup(fmr_C2_H2)
 
-		'''
 		#🟢
 		#Now, reinstall the R group to the xyz file
 		for atom in R1.atoms:
@@ -383,19 +368,11 @@ class xyzStructure:
 		for atom in R2.atoms:
 			self.atoms.append(atom)
 
-		'''
-
-		#🟡 Looks a little shabby, but not wrong
+		#🟢 Looks a little shabby, but not wrong
 		self.atoms.append(fiveMemberedRingInstance.O1atom)
 		self.atoms.append(fiveMemberedRingInstance.C3atom)
 		self.atoms.append(fiveMemberedRingInstance.O2atom)
-
-		#Just putting this here for debugging
-		self.atoms.append(fiveMemberedRingInstance.C1atom)
-		self.atoms.append(fiveMemberedRingInstance.C2atom)
-		self.atoms.append(fiveMemberedRingInstance.R1atom)
-		self.atoms.append(fiveMemberedRingInstance.R2atom)
-
+		
 		self.regenerateAtomLines(self.atoms)
 
 class Rgroup:
@@ -407,29 +384,39 @@ class Rgroup:
 		self.atoms = [atom(line) for line in self.R_xyz.split("\n")]
 		self.atomLines = [line for line in self.R_xyz.split("\n")]
 		
-		self.C_r = C_r
-		self.origin = C_r
+		self.C_r = C_r.copy()
+		self.origin = C_r.copy()
 
+	#NOTE: updatge for both the atoms and R_xyz attribute
 	def translate(self, vectorOfTranslation):
 		self.R_xyz = ''
 		for atom in self.atoms:
 			atom.translate(vectorOfTranslation)
 			self.R_xyz += f"{atom.atomString}\n"
-	#NOTE: this code has not been tested
-	def getRgroupOrientation(self):
-		atomR = [atom.r for atom in self.atoms]
-		points = np.vstack(atomR)
-		u = functions.orientVector(points)
-		return u
+		self.C_r += vectorOfTranslation
+		self.origin += vectorOfTranslation
 
-	def reorientRgroup(self, origin, newOrientation):
-		R_P = np.stack([atom.r for atom in self.atoms])
+	def getRgroupOrientation(self):
+		
+		displacements = [atom.r - self.origin for atom in self.atoms]
+		avgVector = np.mean(displacements, axis=0)
+		norm = np.linalg.norm(avgVector)
+		return avgVector / norm
+		
+
+	#NOTE: the update takes place within the R object
+	def reorientRgroup(self, newOrientation):
 		#Note: this returns non-type figure out why
 		R_u = self.getRgroupOrientation()
 
-		points_1 = functions.rotatePoints(R_P, origin, R_u, newOrientation)
+		R_P = np.stack([atom.r for atom in self.atoms])
+		
+
+		#NOTE: I am worried these points are not getting updated
+		points_1 = functions.reorient_points(R_P, self.origin, R_u, newOrientation)
 		for atom, point in zip(self.atoms, points_1):
 			atom.r = point
+			atom.updateString()
 
 
 		
@@ -557,32 +544,31 @@ class fiveMemberedRing:
 	#NOTE: I think this should enforce sane geometries on its own
 		#NOTE: I can only verify after adding
 	
+
 	def putInPlaneOf_MetalAlkyne(self, xyzObject):
-		src_pts = np.vstack([self.O1atom.r, self.Niatom.r, self.C2atom.r])
+
+		src_anchor = np.vstack([self.O1atom.r, self.Niatom.r, self.C2atom.r])
 
 		C1_r, C2_r = xyzObject.findX1_andX2nearNickelRs()
 		Ni_r = xyzObject.findNickelR()
+		dst_anchor = np.vstack([np.array(C1_r), np.array(Ni_r), np.array(C2_r)])
 
-		dst_pts = np.vstack([np.array(C1_r), np.array(Ni_r), np.array(C2_r)])
+		R, t = functions.rigid_transform(src_anchor, dst_anchor)
 
-		R, t = functions.rigid_transform(src_pts, dst_pts)
+		ring_atoms = [
+			self.O1atom,
+			self.C3atom,
+			self.O2atom,
+			self.C1atom,
+			self.C2atom,
+			self.Niatom,
+			self.R1atom,
+			self.R2atom
+		]
 
-		# Apply
-		self.O1atom.r = R @ self.O1atom.r + t
-		self.C3atom.r = R @ self.C3atom.r + t
-		self.O2atom.r = R @ self.O2atom.r + t
-		self.C1atom.r = R @ self.C1atom.r + t
-		self.C2atom.r = R @ self.C2atom.r + t
-		self.Niatom.r = R @ self.Niatom.r + t
-
-		#Update the strings
-		self.O1atom.updateString()
-		self.C3atom.updateString()
-		self.O2atom.updateString()
-		self.C2atom.updateString()
-		self.Niatom.updateString()
-
-
+		for atom in ring_atoms:
+			atom.r = R @ atom.r + t
+			atom.updateString()
 
 		
 		
