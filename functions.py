@@ -261,53 +261,14 @@ def reorient_points(points, origin, current_dir, target_dir):
 
     return transformed_points
 
-'''
-#Courtesy of chatGPT
-def rotatePoints(points, origin, u, v):
-    """
-    Rotate a set of 3D points so that orientation vector u aligns with v.
+def findCentralPoint(points):
+	
+	N = len(points)
+	center = np.array([0, 0, 0], dtype = 'float64')
 
-    Parameters
-    ----------
-    points : (N, 3) array
-        3D coordinates of points
-    origin : (3,) array
-        The origin about which to rotate
-    u, v : (3,) arrays
-        Unit vectors: current orientation and target orientation
+	for r in points:
+		center+=r
 
-    Returns
-    -------
-    rotated_points : (N, 3) array
-    """
-    u = u / np.linalg.norm(u)
-    v = v / np.linalg.norm(v)
+	COM = center/N
+	return COM
 
-    # Check if vectors are parallel
-    if np.allclose(u, v):
-        return points.copy()
-    if np.allclose(u, -v):
-        # Rotate 180° around any axis perpendicular to u
-        perp = np.array([1,0,0]) if abs(u[0]) < 0.9 else np.array([0,1,0])
-        k = np.cross(u, perp)
-        k /= np.linalg.norm(k)
-        theta = np.pi
-    else:
-        k = np.cross(u, v)
-        k /= np.linalg.norm(k)
-        theta = np.arccos(np.dot(u, v))
-
-    # Rodrigues rotation formula
-    K = np.array([
-        [0, -k[2], k[1]],
-        [k[2], 0, -k[0]],
-        [-k[1], k[0], 0]
-    ])
-    R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
-
-    # Apply rotation
-    shifted = points - origin
-    rotated = shifted @ R.T
-    return rotated + origin
-
-'''

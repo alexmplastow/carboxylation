@@ -375,6 +375,23 @@ class xyzStructure:
 		
 		self.regenerateAtomLines(self.atoms)
 
+	#I do not mine the weight because I see no point
+	def findCOMproxy(self):
+		
+		R = [atom.r for atom in self.atoms]
+		R = np.array(R)
+
+		COM = functions.findCentralPoint(R)
+		
+		self.COM = COM
+		return self.COM
+
+	#TODO: draft this method
+	#def separateFiveMemberRing()
+		
+		
+		
+
 class Rgroup:
 	def __init__(self, R_indices, R_xyz, C_r):
 		self.R_indices = R_indices
@@ -569,6 +586,17 @@ class fiveMemberedRing:
 		for atom in ring_atoms:
 			atom.r = R @ atom.r + t
 			atom.updateString()
+
+	def findCOMproxy(self):
+		
+		R = [atom.r for atom in self.atoms]
+		R = np.array(R)
+
+		COM = functions.findCentralPoint(R)
+		
+		self.COM = COM
+		return self.COM
+
 
 		
 		
