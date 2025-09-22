@@ -10,7 +10,7 @@ from ase.neighborlist import NeighborList, natural_cutoffs
 
 #Add a routine for adding the pentane ring to the molecule of interest
 
-#TODO: battle test this code by adding the five member ring
+#TODO: generate the molecules
 
 class atom:
 	def __init__(self, atomString):
@@ -27,7 +27,6 @@ class atom:
 		self.atomString = f"{self.element} {self.r[0]} {self.r[1]} {self.r[2]}"
 
 
-#TODO: rename the atoms attribute, it makes your code confusing
 class xyzStructure:
 	def __init__(self, xyzString):
 		self.xyzString = xyzString
@@ -311,23 +310,38 @@ class xyzStructure:
 	#
 
 
-	def constructRingIntermediate(self, fiveMemberedRingInstance):
+	#TODO: see if you can find a more elegant solution to grabbing the different ligand indices
+	def constructRingIntermediate(self, fiveMemberedRingInstance, switchR1andR2 = False):
 		
-		#🟡 Looks a little shabby, but not wrong
+		#🟢 Looks a little shabby, but not wrong
 		fiveMemberedRingInstance.putInPlaneOf_MetalAlkyne(xyzObject = self)
 		
 		#Add the carboxylate atoms to the xyz string/atom objects
 		#NOTE: this is the sanity check
 		#🟢
 		#Just take the R1 and R2 groups, get their translation vectors first
-		C1_index, C2_index = self.findX1_andX2nearNickelIndices()
-		C1_r, C2_r = self.findX1_andX2nearNickelRs()
+
+		if switchR1andR2 == False:
+			C1_index, C2_index = self.findX1_andX2nearNickelIndices()
+			C1_r, C2_r = self.findX1_andX2nearNickelRs()
+		elif switchR1andR2 == True:
+			C2_index, C1_index = self.findX1_andX2nearNickelIndices()
+			C2_r, C1_r = self.findX1_andX2nearNickelRs()
+
+		else:
+			raise Exception("You can only enter True or false for the switchR1andR2 variable")
+
+
 
 		#🟢
 		#Add a routine for translating C1 and its R group
-		R1 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
-		R2 = self.getRGroup(index = 2, deleteRgroupFromXYZ = False)
-	
+		if switchR1andR2 == False:
+			R1 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
+			R2 = self.getRGroup(index = 2, deleteRgroupFromXYZ = False)
+		
+		elif switchR1andR2 == True:
+			R1 = self.getRGroup(index = 2, deleteRgroupFromXYZ = False)
+			R2 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
 	
 		#🟢
 		fmr_C1_r = fiveMemberedRingInstance.C1atom.r
@@ -360,6 +374,9 @@ class xyzStructure:
 		R1.reorientRgroup(fmr_C1_H1)
 		R2.reorientRgroup(fmr_C2_H2)
 
+		#I'm grabbing this so my code doesn't need to be agnostic to the scaffold location
+		bipyIndices = len(self.atoms)		
+
 		#🟢
 		#Now, reinstall the R group to the xyz file
 		for atom in R1.atoms:
@@ -374,6 +391,9 @@ class xyzStructure:
 		self.atoms.append(fiveMemberedRingInstance.O2atom)
 		
 		self.regenerateAtomLines(self.atoms)
+		
+		#So I cann access the scaffold Indices later
+		self.scaffoldIndices = [bipyIndices, len(self.atoms)]
 
 	#I do not mine the weight because I see no point
 	def findCOMproxy(self):
@@ -387,10 +407,35 @@ class xyzStructure:
 		return self.COM
 
 	#TODO: draft this method
-	#def separateFiveMemberRing()
+	#NOTE: Implement this after generating the five member ring scaffold
+	def separateFiveMemberRing(self, fiveMemberedRingInstance, d_sep):
+
+
+		bipy_COM = self.findCOMproxy()
+		fmr_COM = fiveMemberedRingInstance.findCOMproxy()
+
+		v_fmr_bpy = functions.unitVector(fmr_COM, bipy_COM) * d_sep
+		v_bpy_fmr = functions.unitVector(bipy_COM, fmr_COM) * d_sep
+
+		try:
+			bipyIndices = list(range(0, self.scaffoldIndices[0]))
+			scaffoldIndices = list(range(self.scaffoldIndices[0], self.scaffoldIndices[-1]))
+
+		except:
+			raise Exception("Most probably, you have neglected to execute the .constructRingIntermediate method yet")
+
+		for i, atom in enumerate(self.atoms):
+
+			if i in bipyIndices:
+				atom.r+=v_fmr_bpy
+				atom.updateString()
+
+			if i in scaffoldIndices:
+				atom.r+=v_bpy_fmr
+				atom.updateString()
 		
-		
-		
+		self.regenerateAtomLines(self.atoms)
+	
 
 class Rgroup:
 	def __init__(self, R_indices, R_xyz, C_r):
@@ -434,9 +479,6 @@ class Rgroup:
 		for atom, point in zip(self.atoms, points_1):
 			atom.r = point
 			atom.updateString()
-
-
-		
 		
 		
 #TODO: clean up the redefining of lines a bit, this is what functions are made for
@@ -549,9 +591,11 @@ class fiveMemberedRing:
 		self.C1atom = xyzStructureInstance.returnAtomByIndex(self.C1Index)
 		self.C2atom = xyzStructureInstance.returnAtomByIndex(self.C2Index)
 		self.Niatom = xyzStructureInstance.returnAtomByIndex(self.NiIndex)
-
 		self.R1atom = xyzStructureInstance.returnAtomByIndex(self.R1Index)
 		self.R2atom = xyzStructureInstance.returnAtomByIndex(self.R2Index)
+
+		self.atoms = [self.O1atom, self.C3atom, self.O2atom, self.C1atom, 
+				self.C2atom, self.Niatom, self.R1atom, self.R2atom]
 
 
 
@@ -597,11 +641,6 @@ class fiveMemberedRing:
 		self.COM = COM
 		return self.COM
 
-
-		
-		
-
-
 #TODO: add a method to the xyzStructure for identifying the indices of those atoms which are attached to C1 and C2 (this could be a headache..... I'll probably need a molecular graphics software to guess bonds for me
 
 #TODO: add an R1andR2 object for handling rotation operations and such
@@ -620,4 +659,9 @@ class fiveMemberedRing:
 
 #TODO: for whatever reason, the fiveMember ring attributes are not
 			#TODO: refelecting the transformation
+
+#TODO: battle test this code by adding the five member ring
+
+#TODO: rename the atoms attribute, it makes your code confusing
+
 

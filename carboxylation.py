@@ -20,11 +20,10 @@ XYZobjects = [objects.xyzStructure(xyzString) for xyzString in xyzList]
 fiveMemberedRingInstance = objects.fiveMemberedRing()
 
 testXYZ = XYZobjects[0]
-testXYZ.constructRingIntermediate(fiveMemberedRingInstance)
-
-testXYZ.findCOMproxy()
+testXYZ.constructRingIntermediate(fiveMemberedRingInstance, switchR1andR2 = False)
+testXYZ.separateFiveMemberRing(fiveMemberedRingInstance, d_sep = 0.5)
 
 #testXYZ.printToFile("ringlessTest.xyz")
-#testXYZ.printToFile("ringTest.xyz")
-#testXYZ.viewInVMD()
+testXYZ.printToFile("ringTest.xyz")
+testXYZ.viewInVMD()
 
