@@ -201,7 +201,27 @@ def rotation_matrix(axis, angle):
     I = np.eye(3)
     return I + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
 
+def rotate_points(points, origin, axis, angle_deg):
+    """
+    Rotate a set of 3D points around an axis through a given origin.
+    
+    points: (N,3) array of 3D points
+    origin: (3,) array, the pivot point
+    axis: (3,) array, axis of rotation
+    angle_deg: float, rotation angle in degrees
+    """
+    R = rotation_matrix(axis, angle_deg)
+    points = np.asarray(points, dtype=float)
+    origin = np.asarray(origin, dtype=float)
 
+    # Translate points so origin is at (0,0,0)
+    shifted = points - origin
+    # Apply rotation
+    rotated = shifted @ R.T
+    # Translate back
+    return rotated + origin
+
+#NOTE: I think this function would be rather handy
 def reorient_points(points, origin, current_dir, target_dir):
     """
     Rotate a set of points so that `current_dir` aligns with `target_dir`.
@@ -272,5 +292,40 @@ def findCentralPoint(points):
 	COM = center/N
 	return COM
 
-	
+#Courtesy of chatGPT
+def findAngleBetweenVectors(v1, v2):
+	# Compute dot product and magnitudes
+	dot_product = np.dot(v1, v2)
+	norm_product = np.linalg.norm(v1) * np.linalg.norm(v2)
 
+	if norm_product == 0:
+		raise ValueError("One of the vectors has zero magnitude.")
+
+	# Clip value to avoid numerical issues outside [-1,1]
+	cos_theta = np.clip(dot_product / norm_product, -1.0, 1.0)
+	angle = np.arccos(cos_theta)
+
+	return np.degrees(angle)
+	
+def findMidpoint(r1, r2):
+	m = (r1 + r2) / 2
+	return m
+
+#Courtesy of chatGPT
+def rotatePointsByAngle(points, origin, axis, angle_deg):
+    """
+    Rotate a set of 3D points around an axis through a given origin.
+    
+    points: (N,3) array of 3D points
+    origin: (3,) array, the pivot point
+    axis: (3,) array, axis of rotation
+    angle_deg: float, rotation angle in degrees
+    """
+    R = rotation_matrix(axis, angle_deg)
+
+    # Translate points so origin is at (0,0,0)
+    shifted = points - origin
+    # Apply rotation
+    rotated = shifted @ R.T
+    # Translate back
+    return rotated + origin

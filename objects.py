@@ -1,3 +1,25 @@
+
+#NOTE: the code here is fairly intuitive, spare the fact that atom.r and atom.atomString update 
+	#NOTE: seperately
+
+#TODO: work out a fix for enforcing bond lengths closer to your analog (i.e. maybe use an otpimizer to translate the five member ring intermediate until the bond lengths are close to the analog)
+
+#TODO: add a scheme for generating both the tetrahedral and planar configurations in addition to the C1C2Ni plane alignment (best to work Thang's code into your xyzStructure object's methods)
+	#NOTE: I think it is fairly clear that I can solve the problem a little faster by working out
+	#NOTE: my own transformations instead of relying on Thang's code
+
+#TODO: I'd add a force field optimization for the coordinating group
+
+#TODO: Try an RDkit-based method for valence sanity checks
+	#TODO: *ASE
+
+#NOTE: at least one of the molecules optimized isn't sane, 16 looks like it has a double bonded hydrogen,
+	#NOTE: even before the molecule had a hydrogen added
+
+#NOTE: ligand 250 might be another good example, it seems like the molecule in question has a couple
+	#NOTE: close hydrogens, VMD doesn't perceive they are bonds, but ASE does
+
+
 import functions
 
 import tempfile
@@ -8,10 +30,75 @@ import numpy as np
 from ase.io import read
 from ase.neighborlist import NeighborList, natural_cutoffs
 
+from rdkit.Chem.rdmolfiles import MolFromXYZFile
+from rdkit.Chem import rdmolops
+from rdkit.Chem import rdDetermineBonds
+from rdkit import Chem
+
+MAX_VALENCE = {
+    "H": 1,
+    "He": 0,
+    "Li": 1,
+    "Be": 2,
+    "B": 3,
+    "C": 4,
+    "N": 3,
+    "O": 2,
+    "F": 1,
+    "Ne": 0,
+    "Na": 1,
+    "Mg": 2,
+    "Al": 3,
+    "Si": 4,
+    "P": 3,
+    "S": 2,
+    "Cl": 1,
+    "Ar": 0,
+    "K": 1,
+    "Ca": 2,
+    "Sc": 3,
+    "Ti": 4,
+    "V": 5,
+    "Cr": 6,
+    "Mn": 7,
+    "Fe": 6,
+    "Co": 6,
+    "Ni": 6,
+    "Cu": 4,
+    "Zn": 2,
+    "Ga": 3,
+    "Ge": 4,
+    "As": 3,
+    "Se": 2,
+    "Br": 1,
+    "Kr": 0,
+    "Rb": 1,
+    "Sr": 2,
+    "Y": 3,
+    "Zr": 4,
+    "Nb": 5,
+    "Mo": 6,
+    "Tc": 7,
+    "Ru": 8,
+    "Rh": 6,
+    "Pd": 6,
+    "Ag": 4,
+    "Cd": 2,
+    "In": 3,
+    "Sn": 4,
+    "Sb": 3,
+    "Te": 2,
+    "I": 1,
+    "Xe": 0
+}
+
+
+
 #Add a routine for adding the pentane ring to the molecule of interest
 
 #TODO: generate the molecules
 
+#NOTE:
 class atom:
 	def __init__(self, atomString):
 		self.atomString = atomString
@@ -35,10 +122,15 @@ class xyzStructure:
 		self.atomLines = [ln.strip() for ln in lines[2:] if ln.strip()]
 		self.atoms = [atom(atomLine) for atomLine in self.atomLines]
 
+	
 	#NOTE: assumes the atoms attribute has been set correctly
 		#Fixes the xyz string while its at it
 	#NOTE: as such, I've forced the atoms attribute to be a manual input
 	def regenerateAtomLines(self, atoms):
+		
+		for atom in self.atoms:
+			atom.updateString()
+
 		self.atomCount = len(atoms)
 		self.atomLines = [atom.atomString for atom in atoms]
 		self.xyzString = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atomLines)
@@ -299,6 +391,9 @@ class xyzStructure:
 		m = (atom1.r + atom2.r)/2
 		return m
 
+
+		
+
 	#  
 	#          O1
 	#       /      \
@@ -313,12 +408,10 @@ class xyzStructure:
 	#TODO: see if you can find a more elegant solution to grabbing the different ligand indices
 	def constructRingIntermediate(self, fiveMemberedRingInstance, switchR1andR2 = False):
 		
-		#🟢 Looks a little shabby, but not wrong
 		fiveMemberedRingInstance.putInPlaneOf_MetalAlkyne(xyzObject = self)
 		
 		#Add the carboxylate atoms to the xyz string/atom objects
 		#NOTE: this is the sanity check
-		#🟢
 		#Just take the R1 and R2 groups, get their translation vectors first
 
 		if switchR1andR2 == False:
@@ -332,8 +425,6 @@ class xyzStructure:
 			raise Exception("You can only enter True or false for the switchR1andR2 variable")
 
 
-
-		#🟢
 		#Add a routine for translating C1 and its R group
 		if switchR1andR2 == False:
 			R1 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
@@ -343,25 +434,19 @@ class xyzStructure:
 			R1 = self.getRGroup(index = 2, deleteRgroupFromXYZ = False)
 			R2 = self.getRGroup(index = 1, deleteRgroupFromXYZ = False)
 	
-		#🟢
 		fmr_C1_r = fiveMemberedRingInstance.C1atom.r
 		fmr_C2_r = fiveMemberedRingInstance.C2atom.r
 
-		
-		#🟢
 		C1TranslationVector = fmr_C1_r - C1_r
 		C2TranslationVector = fmr_C2_r - C2_r		
 		
-		#🟢
 		#Removing the R groups for translating
 		self.deleteRgroups()
 	
-		#🟢
 		#Now, do the translation
 		R1.translate(C1TranslationVector)
 		R2.translate(C2TranslationVector)
 		
-		#🟢
 		#Note, the orientation of the unit vectors produced here are sane
 		fmr_C1_H1 = functions.unitVector(fiveMemberedRingInstance.C1atom.r, 
 						fiveMemberedRingInstance.R1atom.r)
@@ -369,15 +454,12 @@ class xyzStructure:
 		fmr_C2_H2 = functions.unitVector(fiveMemberedRingInstance.C2atom.r, 
 						fiveMemberedRingInstance.R2atom.r)
 
-
-		#🟢
 		R1.reorientRgroup(fmr_C1_H1)
 		R2.reorientRgroup(fmr_C2_H2)
 
 		#I'm grabbing this so my code doesn't need to be agnostic to the scaffold location
 		bipyIndices = len(self.atoms)		
 
-		#🟢
 		#Now, reinstall the R group to the xyz file
 		for atom in R1.atoms:
 			self.atoms.append(atom)
@@ -385,7 +467,6 @@ class xyzStructure:
 		for atom in R2.atoms:
 			self.atoms.append(atom)
 
-		#🟢 Looks a little shabby, but not wrong
 		self.atoms.append(fiveMemberedRingInstance.O1atom)
 		self.atoms.append(fiveMemberedRingInstance.C3atom)
 		self.atoms.append(fiveMemberedRingInstance.O2atom)
@@ -393,7 +474,168 @@ class xyzStructure:
 		self.regenerateAtomLines(self.atoms)
 		
 		#So I cann access the scaffold Indices later
-		self.scaffoldIndices = [bipyIndices, len(self.atoms)]
+		#NOTE: scaffold indices will also contain the R groups
+		self.scaffoldIndices = list(range(bipyIndices, len(self.atoms)))
+
+	#NOTE: this is just a function for finding the oxygen and carbon nearest
+		#NOTE: to the nickel
+	def getC1O1_atoms(self):
+			
+		self.regenerateAtomLines(self.atoms)
+		#Printing to a temp file
+		self.printToFile('tmp.xyz')
+		atoms = read("tmp.xyz")
+		#Bad things happen if you don't remove this file immediately after creation
+		os.remove("tmp.xyz")
+
+		cutoffs = natural_cutoffs(atoms)
+		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
+		nl.update(atoms)
+	
+		#Best add indices
+		self.addAtomIndices()
+		for atom in self.atoms:
+			if atom.element == 'Ni':
+				Ni_i = atom.index
+				self.metalAtom = atom
+				break
+	
+		indices, _ = nl.get_neighbors(Ni_i)
+		for atom in self.atoms:
+			if atom.element == 'O' and atom.index in indices:
+				self.O1_atom = atom
+				break
+
+		for atom in self.atoms:
+			if atom.element == 'C' and atom.index in indices:
+				self.C1_atom = atom
+				break
+
+		return self.C1_atom, self.O1_atom
+
+	#TODO: finish fleshing out this function
+
+	#NOTE: This defines the nickel attribute, but it is hidden in the code
+	def getN1N2_atoms(self):
+		
+		self.regenerateAtomLines(self.atoms)
+		#Printing to a temp file
+		self.printToFile('tmp.xyz')
+		atoms = read("tmp.xyz")
+		#Bad things happen if you don't remove this file immediately after creation
+		os.remove("tmp.xyz")
+
+		cutoffs = natural_cutoffs(atoms)
+		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
+		nl.update(atoms)
+
+		#Best add indices
+		self.addAtomIndices()
+		for atom in self.atoms:
+			if atom.element == 'Ni':
+				Ni_i = atom.index
+				self.metalAtom = atom
+				break
+	
+		indices, _ = nl.get_neighbors(Ni_i)
+		for atom in self.atoms:
+			if atom.element == 'N' and atom.index in indices:
+				self.N1_atom = atom
+				break
+
+		for atom in self.atoms:
+			if atom.element == 'N' and atom.index in indices and\
+				atom.index != self.N1_atom.index:
+				self.N2_atom = atom
+				break
+
+		return self.N1_atom, self.N2_atom
+
+	def getC1O1_crossProduct(self):
+		
+		C1atom, O1atom = self.getC1O1_atoms()
+		metalAtom = self.metalAtom
+
+		self.C1O1MetalCrossProduct = \
+			functions.findCrossProduct(
+			C1atom.r, O1atom.r, metalAtom.r)
+
+		return self.C1O1MetalCrossProduct
+
+	def getN1N2_crossProduct(self):
+		
+		N1atom, N2atom = self.getN1N2_atoms()
+		metalAtom = self.metalAtom
+
+		self.N1N2MetalCrossProduct = \
+			functions.findCrossProduct(
+			N1atom.r, N2atom.r, metalAtom.r)
+
+		return self.N1N2MetalCrossProduct
+
+	def findCrossProductAngles_ofPrimary_SP3(self):
+
+		#Grabbing the cross products
+		C1O1_crossProduct = self.getC1O1_crossProduct()
+		N1N2_crossProduct = self.getN1N2_crossProduct()	
+
+		#Finding their angle
+		θ = functions.findAngleBetweenVectors(C1O1_crossProduct, N1N2_crossProduct)
+		
+		self.SP3_angle = θ
+		return self.SP3_angle
+
+	
+	def findMetalAxisOfRotation(self):
+		
+		#Collecting N1 and N2
+		N1atom, N2atom = self.getN1N2_atoms()
+		metalAtom = self.metalAtom
+
+		N1N2_midpoint = functions.findMidpoint(N1atom.r, N2atom.r)
+
+		u_rot = functions.unitVector(N1N2_midpoint, metalAtom.r)
+
+		return u_rot
+
+	#NOTE: Don't forget to regenerate your atom strings when you are done
+	def intermediateRotation(self, angle):
+		
+		u_rot = self.findMetalAxisOfRotation()
+
+
+		if hasattr(self, "scaffoldIndices"):
+			pass
+		else:
+			raise Exception("You executed the code without constructing your intermediate")
+
+		
+		#I think I can avoid copying this data 
+		scaffoldAtoms = [self.atoms[i] for i in self.scaffoldIndices]
+		
+		#I'm guessing the code will behave a litle more closely to expectation
+			#If I delete some of the atoms then add them later
+
+		self.atoms = [self.atoms[i] for i in range(0,len(self.atoms)) 
+						if i not in self.scaffoldIndices]
+
+		P = np.array([scaffoldAtom.r for scaffoldAtom in scaffoldAtoms])
+		
+		P_r = functions.rotatePointsByAngle(P, self.metalAtom.r, u_rot, angle)
+
+		
+		for atom, p_r in zip(scaffoldAtoms, P_r):
+			atom.r = p_r
+
+		self.atoms+=scaffoldAtoms
+
+		self.regenerateAtomLines(self.atoms)
+
+	def reverseIntermediateRotation(self):
+
+		SP3_angle = self.findCrossProductAngles_ofPrimary_SP3()
+
+		self.intermediateRotation(-SP3_angle)
 
 	#I do not mine the weight because I see no point
 	def findCOMproxy(self):
@@ -435,6 +677,68 @@ class xyzStructure:
 				atom.updateString()
 		
 		self.regenerateAtomLines(self.atoms)
+	
+	def addAtomIndices(self):
+		#Regenerating atoms does not harm
+		self.regenerateAtomLines(self.atoms)
+
+		for i, atom in enumerate(self.atoms):
+			atom.index = i
+
+
+
+	def addAtomNeighborNumberToAtoms(self):
+		
+		#Regenerating atoms does no harm
+		self.regenerateAtomLines(self.atoms)
+		#Atom indices will be included by default
+		self.addAtomIndices()
+		#Printing to a temp file
+		self.printToFile('tmp.xyz')
+		#Running the ASE environment
+		cutoffs = natural_cutoffs(read("tmp.xyz"))
+		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
+		nl.update(read("tmp.xyz"))
+		#Removing the file or shenanigans begin
+		os.remove('tmp.xyz')
+
+		for atom in self.atoms:	
+			indices, _ = nl.get_neighbors(atom.index)
+			atom.neighborIndices = indices
+
+	#TODO: battle test this function
+	def valenceSanityCheck(self):
+		#You should access your variables with the MAX_VALENCE dictionary
+
+		self.addAtomNeighborNumberToAtoms()
+
+		for atom in self.atoms:
+			if MAX_VALENCE[atom.element] < len(atom.neighborIndices):
+				atom.valenceSanity = 'not sane'
+			else:
+				atom.valenceSanity = 'sane'
+
+		self.valenceSanityRecord = ''
+		for atom in self.atoms:
+			if atom.valenceSanity == 'not sane':
+				self.valenceSanityRecord += f"Atom of element {atom.element} @ index" \
+								f"{atom.index} has abnormal valence \n" 
+				
+	def writeSanityRecord(self, sanityRecordPath):
+		
+		self.valenceSanityCheck()
+
+		if self.valenceSanityRecord == '':
+			return 0
+		else:
+			file = open(sanityRecordPath, "a")
+			file.write(self.valenceSanityRecord)
+			file.close()
+
+	
+
+		
+		
 	
 
 class Rgroup:
@@ -479,6 +783,8 @@ class Rgroup:
 		for atom, point in zip(self.atoms, points_1):
 			atom.r = point
 			atom.updateString()
+
+			
 		
 		
 #TODO: clean up the redefining of lines a bit, this is what functions are made for
@@ -664,4 +970,44 @@ class fiveMemberedRing:
 
 #TODO: rename the atoms attribute, it makes your code confusing
 
+#TODO: Build a force-field optimization method (i.e. UFF or MMFF), make sure it doesn't distort the
+	#TODO: geometry significantly
+
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#TODO: Try an RDkit-based method for bond-length sanity checks
+	#NOTE: I'm not so sure this is reasonable because:
+	#NOTE: 1 ASE assigns bonds based on presumably sane criterion, it's not like
+	#NOTE: a topolgo file where you can hypothetically force an insane bond length by mistake
+	#NOTE: 2: DFT or DFT analogs (i.e. machine learning solutions) will most probably adjust
+	#NOTE: bond lengths
+	#NOTE: the priority seems to be valence sanity checks
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+#TODO: finish this function
+
+	
+'''
+	#NOTE: Looks sane
+	def generateRDKitMol(self):
+		self.printToFile('tmp.xyz')
+		mol = MolFromXYZFile('tmp.xyz')
+		os.remove('tmp.xyz')
+		return mol
+
+	def debug(self):
+		raw_mol = self.generateRDKitMol()
+		mol = Chem.Mol(raw_mol)
+		rdDetermineBonds.DetermineBonds(mol)
+		raise Exception("Stop here")
+		#for atom in mol.GetAtoms():
+		#	print(atom.GetDegree())
+		
+		#rdmolops.Kekulize(mol, clearAromaticFlags=True)
+		
+		for atom in mol.GetAtoms():
+			print(atom.GetDegree())
+
+		#mol.Debug()
+
+'''
 
