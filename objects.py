@@ -1,3 +1,4 @@
+#NOTE: this code is also rather delicate with regard to radians and degrees, some are in radians other are in degrees. Right now that must be inferred from the code which is acutely lame
 
 #NOTE: the code here is fairly intuitive, spare the fact that atom.r and atom.atomString update 
 	#NOTE: seperately
@@ -18,7 +19,16 @@
 
 #NOTE: ligand 250 might be another good example, it seems like the molecule in question has a couple
 	#NOTE: close hydrogens, VMD doesn't perceive they are bonds, but ASE does
+#TODO: the tetrahedral fix is slightly imperfect, fix it if you find the time
 
+#TODO: your carboxylate vanishes after R rotation, I have no idea why
+
+
+#TODO: work out a method which handles reorienations of the R1/R2 groups to avoid steric clashes
+	#NOTE: 3 is a good test bed for this
+	#NOTE:  4 is another good case
+	#NOTE: so is 16
+	#NOTE: actually this seems to be the issue in pretty much all of these guys
 
 import functions
 
@@ -27,6 +37,8 @@ import subprocess
 import os
 import numpy as np
 
+import math
+
 from ase.io import read
 from ase.neighborlist import NeighborList, natural_cutoffs
 
@@ -34,6 +46,7 @@ from rdkit.Chem.rdmolfiles import MolFromXYZFile
 from rdkit.Chem import rdmolops
 from rdkit.Chem import rdDetermineBonds
 from rdkit import Chem
+
 
 MAX_VALENCE = {
     "H": 1,
@@ -316,19 +329,30 @@ class xyzStructure:
 			self.xyzString = self.atomCount + "\n" + "\n" + "\n".join(self.atomLines)
 		return Rgroup(R_indices, R_xyz, C_r)
 
-	def deleteRgroups(self):
-		R1_indices = self.getRGroupIndices(index = 1)
-		R2_indices = self.getRGroupIndices(index = 2)
+	#TODO: extend this to handle cases where the carboxylate has been added
+	def deleteRgroups(self, carboxylated = False):
+		if not carboxylated:
+			R1_indices = self.getRGroupIndices(index = 1)
+			R2_indices = self.getRGroupIndices(index = 2)
+
+		elif carboxylated:
+			R1_indices = self.R1_indices
+			R2_indices = self.R2_indices
+
+		else:
+			raise Exception("🤦🤦🤦🤦🤦🤦🤦🤦🤦🤦🤦🤦🤦🤦")
 
 		R_indices = R1_indices + R2_indices
 
-		self.atomLines = [self.atomLines[i] for i in 
-					range(0,len(self.atomLines)) 
+
+
+
+		self.atomLines = [self.atomLines[i] for i in 							range(0,len(self.atomLines)) 
 					if i not in R_indices]
 
 		self.atoms = [atom(self.atomLines[i]) for i in 
-					range(0,len(self.atomLines)) 
-					if i not in R_indices]
+				range(0,len(self.atomLines)) 
+				if i not in R_indices]
 
 
 		self.atomCount = str(int(self.atomCount) - len(R_indices))
@@ -464,18 +488,115 @@ class xyzStructure:
 		for atom in R1.atoms:
 			self.atoms.append(atom)
 
+		self.R1_indices = list(range(bipyIndices, len(self.atoms)))
+		self.R1_Cr = fiveMemberedRingInstance.C1atom.r
+
 		for atom in R2.atoms:
 			self.atoms.append(atom)
 
+		self.R2_indices = list(range(self.R1_indices[-1] + 1, len(self.atoms)))
+		self.R2_Cr = fiveMemberedRingInstance.C2atom.r
+
+		
 		self.atoms.append(fiveMemberedRingInstance.O1atom)
 		self.atoms.append(fiveMemberedRingInstance.C3atom)
 		self.atoms.append(fiveMemberedRingInstance.O2atom)
+
+		#I decided to add these attributes instead of making my code more elegant
+		self.O1atom = fiveMemberedRingInstance.O1atom
+		self.C3atom = fiveMemberedRingInstance.C3atom
+		self.O2atom = fiveMemberedRingInstance.O2atom
 		
 		self.regenerateAtomLines(self.atoms)
 		
 		#So I cann access the scaffold Indices later
 		#NOTE: scaffold indices will also contain the R groups
 		self.scaffoldIndices = list(range(bipyIndices, len(self.atoms)))
+
+	#NOTE: this code assumes that the five member ring intermediate was generated
+	def getCarboxylatedR1andR2s(self, deleteRgroups = True):
+
+		R1_xyzLines = [atom.atomString for i, atom in enumerate(self.atoms) if i in self.R1_indices]
+		R2_xyzLines = [atom.atomString for i, atom in enumerate(self.atoms) if i in self.R2_indices]
+
+		
+
+		R1AtomNum = len(R1_xyzLines)
+		R2AtomNum = len(R2_xyzLines)
+
+		R1_xyzString = "\n".join(R1_xyzLines)
+		R2_xyzString = "\n".join(R2_xyzLines)
+
+		
+		self.R1group = Rgroup(self.R1_indices, R1_xyzString, self.R1_Cr)
+		self.R2group = Rgroup(self.R2_indices, R2_xyzString, self.R2_Cr)
+
+		if deleteRgroups:
+			self.deleteRgroups(carboxylated = True)
+
+		return self.R1group, self.R2group
+
+	def rotateR(self, R_index = 1, rotationAngle = 5):
+		R1, R2 = self.getCarboxylatedR1andR2s()
+
+		if R1.R_xyz == '' or R2.R_xyz == '':
+			raise Exception("Looks like your R groups are deleted")
+
+		if R_index == 1:
+			R1.rotate(rotationAngle)
+
+		elif R_index == 2:
+			R2.rotate(rotationAngle)
+
+		else:
+			raise Exception("Your R_index must be 1 or two")
+
+
+		bipyIndices = len(self.atoms)
+		#I'm choosing to simply not update the R groups, a new instance is declared
+			#Before I need to worry about them again
+		for atom in R1.atoms:
+			self.atoms.append(atom)
+
+		for atom in R2.atoms:
+			self.atoms.append(atom)
+
+		#I should probably find a better fix than this
+		self.atoms.append(self.O1atom)
+		self.atoms.append(self.C3atom)
+		self.atoms.append(self.O2atom)
+
+		#NOTE: I will most likely need these later
+		self.scaffoldIndices = list(range(bipyIndices, len(self.atoms)))
+		self.regenerateAtomLines(self.atoms)
+
+	#TODO: flesh out this funciton an you'll be golden
+	def reduceRclashes(self, R_index=1, rotationAngle = 5):
+
+		valenceSanityMetrics = []
+		Θ = []
+		for θ in range(rotationAngle, 360 + rotationAngle, rotationAngle):
+			
+			self.valenceSanityCheck()
+			self.rotateR(R_index, rotationAngle)
+			
+			if self.valenceSanity == 'sane':
+				valenceSanityMetric = 0
+			
+			elif self.valenceSanity == 'not sane':
+				valenceSanityMetric = len(self.valenceSanityRecord.split("\n"))/2
+
+			valenceSanityMetrics.append(valenceSanityMetric)
+			Θ.append(θ)
+
+		sanityMinimum = min(valenceSanityMetrics)
+
+		for valenceSanityMetric, θ in zip(valenceSanityMetrics, Θ):
+			if valenceSanityMetric == sanityMinimum:
+				optimal_θ = θ + rotationAngle
+
+		self.rotateR(R_index = R_index, rotationAngle = optimal_θ)
+
 
 	#NOTE: this is just a function for finding the oxygen and carbon nearest
 		#NOTE: to the nickel
@@ -513,8 +634,7 @@ class xyzStructure:
 
 		return self.C1_atom, self.O1_atom
 
-	#TODO: finish fleshing out this function
-
+	
 	#NOTE: This defines the nickel attribute, but it is hidden in the code
 	def getN1N2_atoms(self):
 		
@@ -583,10 +703,13 @@ class xyzStructure:
 		θ = functions.findAngleBetweenVectors(C1O1_crossProduct, N1N2_crossProduct)
 		
 		self.SP3_angle = θ
+
 		return self.SP3_angle
 
 	
 	def findMetalAxisOfRotation(self):
+
+		self.findCrossProductAngles_ofPrimary_SP3()
 		
 		#Collecting N1 and N2
 		N1atom, N2atom = self.getN1N2_atoms()
@@ -599,10 +722,10 @@ class xyzStructure:
 		return u_rot
 
 	#NOTE: Don't forget to regenerate your atom strings when you are done
-	def intermediateRotation(self, angle):
+	def intermediateRotation(self, byAngle = False, angle = 0):
 		
-		u_rot = self.findMetalAxisOfRotation()
 
+		u_rot = self.findMetalAxisOfRotation()
 
 		if hasattr(self, "scaffoldIndices"):
 			pass
@@ -621,21 +744,38 @@ class xyzStructure:
 
 		P = np.array([scaffoldAtom.r for scaffoldAtom in scaffoldAtoms])
 		
-		P_r = functions.rotatePointsByAngle(P, self.metalAtom.r, u_rot, angle)
+		#P_r = functions.rotatePointsByAngle(P, self.metalAtom.r, u_rot, angle)
 
-		
+		if byAngle:
+			P_r = functions.rotatePointsByAngle(P, self.metalAtom.r, u_rot, angle)
+		else:
+			P_r = functions.reorient_points(P, self.metalAtom.r, self.C1O1MetalCrossProduct, self.N1N2MetalCrossProduct)
+
+
 		for atom, p_r in zip(scaffoldAtoms, P_r):
 			atom.r = p_r
 
 		self.atoms+=scaffoldAtoms
 
 		self.regenerateAtomLines(self.atoms)
+	
+	#Note: seems sane
+	def forcePlanar(self):
+		self.intermediateRotation()
 
-	def reverseIntermediateRotation(self):
+	#TODO: needs adjusted to handle radians
+	def forceTetrahedral(self):
+		#First forcing planar:
+		self.intermediateRotation()
 
-		SP3_angle = self.findCrossProductAngles_ofPrimary_SP3()
+		#Then forcing 90°
+		self.intermediateRotation(byAngle = True, angle = 90)
 
-		self.intermediateRotation(-SP3_angle)
+	def pivotIntermediate(self, angleInDegrees = 5):
+
+		angleInRadians = (angleInDegrees/180)*math.pi
+
+		self.intermediateRotation(byAngle = True, angle = angleInRadians)
 
 	#I do not mine the weight because I see no point
 	def findCOMproxy(self):
@@ -712,18 +852,62 @@ class xyzStructure:
 
 		self.addAtomNeighborNumberToAtoms()
 
+		#Innocent untilProven guilty
+		self.valenceSanity = 'sane'
+
 		for atom in self.atoms:
 			if MAX_VALENCE[atom.element] < len(atom.neighborIndices):
 				atom.valenceSanity = 'not sane'
+				self.valenceSanity = 'not sane'
 			else:
 				atom.valenceSanity = 'sane'
 
 		self.valenceSanityRecord = ''
-		for atom in self.atoms:
-			if atom.valenceSanity == 'not sane':
-				self.valenceSanityRecord += f"Atom of element {atom.element} @ index" \
-								f"{atom.index} has abnormal valence \n" 
-				
+
+		if self.valenceSanity == 'not sane':
+			for atom in self.atoms:
+				if atom.valenceSanity == 'not sane':
+					self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
+							f"@ index {atom.index} has abnormal valence \n"
+
+		else:
+			self.valenceSanityRecord = ''
+
+	#TODO: the structures being loaded into my sanity check don't seem to be updated
+
+	
+	def pivotCorrectionForValenceSanity(self, angle=5, debug = False):
+
+		#This one already accepts angles in degrees
+		rotationCount = 0
+
+		# Ensure strings are in sync before we start
+		self.regenerateAtomLines(self.atoms)
+
+		while rotationCount < 360:
+			# 1) pivot first (updates atom.r; intermediateRotation ends with regenerate)
+			self.pivotIntermediate(angleInDegrees=angle)
+
+			# 2) regenerate strings (belt-and-suspenders)
+			self.regenerateAtomLines(self.atoms)
+
+			# 3) re-check using the updated geometry
+			self.valenceSanityCheck()
+			
+			# 4) if sane, we’re done; otherwise show the CURRENT (post-pivot) record
+			if self.valenceSanity == 'sane':
+				break
+			if debug == True:
+				print("********************************************")
+				print(rotationCount + angle)  # rotations applied so far
+				print(self.valenceSanityRecord)  # this now reflects post-pivot bonds
+				# OPTIONAL: visualize current geometry (post-pivot)
+				print("********************************************")
+
+				self.viewInVMD()
+
+			rotationCount += angle
+		
 	def writeSanityRecord(self, sanityRecordPath):
 		
 		self.valenceSanityCheck()
@@ -734,19 +918,15 @@ class xyzStructure:
 			file = open(sanityRecordPath, "a")
 			file.write(self.valenceSanityRecord)
 			file.close()
-
 	
-
-		
-		
-	
-
+#NOTE: R_xyz are the lines, not the complete strings to be seen in xyz files 
 class Rgroup:
 	def __init__(self, R_indices, R_xyz, C_r):
 		self.R_indices = R_indices
 		self.R_xyz = R_xyz
 		#Note: this attribute contains some lines from the xyz file
 			#Note: it does not contain all the information needed for a .xyz
+		self.R_xyzFileContents = str(len(self.R_indices)) + "\n" + "\n" + self.R_xyz
 		self.atoms = [atom(line) for line in self.R_xyz.split("\n")]
 		self.atomLines = [line for line in self.R_xyz.split("\n")]
 		
@@ -763,12 +943,15 @@ class Rgroup:
 		self.origin += vectorOfTranslation
 
 	def getRgroupOrientation(self):
-		
-		displacements = [atom.r - self.origin for atom in self.atoms]
+
+		#displacements = [atom.r - self.origin for atom in self.atoms]
+		displacements = []
+		for atom in self.atoms:
+			displacements.append(atom.r - self.origin)
 		avgVector = np.mean(displacements, axis=0)
 		norm = np.linalg.norm(avgVector)
 		return avgVector / norm
-		
+
 
 	#NOTE: the update takes place within the R object
 	def reorientRgroup(self, newOrientation):
@@ -783,6 +966,49 @@ class Rgroup:
 		for atom, point in zip(self.atoms, points_1):
 			atom.r = point
 			atom.updateString()
+
+	def regenerateAtomLines(self, atoms):
+		
+		for atom in self.atoms:
+			atom.updateString()
+
+		self.atomCount = len(atoms)
+		self.atomLines = [atom.atomString for atom in atoms]
+		self.R_xyz = "\n".join(self.atomLines)
+		self.R_xyzFileContents = str(self.atomCount) + "\n" + "\n" + "\n".join(self.atomLines)
+
+
+	def printToFile(self, xyzPath):
+		file = open(xyzPath, "a")
+		file.write(self.R_xyzFileContents)
+		file.close()
+
+	def viewInVMD(self):
+		# Courtesy of chatGPT
+        	with tempfile.NamedTemporaryFile(delete=False, suffix=".xyz") as tmp:
+            		tmp.write(self.R_xyzFileContents.encode("utf-8"))
+            		tmp_path = tmp.name
+
+        	try:
+            		subprocess.run(["vmd", tmp_path])
+
+        	finally:
+            		if os.path.exists(tmp_path):
+                		os.remove(tmp_path)
+
+
+	def rotate(self, angleInDegrees = 5):
+		u_rot = self.getRgroupOrientation()
+		
+		P = np.array([atom.r for atom in self.atoms])
+
+		P_r = functions.rotatePointsByAngle(P, self.origin, u_rot, angleInDegrees)
+
+		for atom, p_r in zip(self.atoms, P_r):
+			atom.r = p_r
+
+		self.regenerateAtomLines(self.atoms)
+	
 
 			
 		
@@ -984,6 +1210,8 @@ class fiveMemberedRing:
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 #TODO: finish this function
+
+#TODO: finish fleshing out this function
 
 	
 '''

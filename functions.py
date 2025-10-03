@@ -189,6 +189,7 @@ def orientVector(points):
 
     return unit_vec
 
+#Takes angles in radians, it sucks
 def rotation_matrix(axis, angle):
     """
     Rodrigues' rotation formula for 3D rotation matrix.
@@ -311,6 +312,7 @@ def findMidpoint(r1, r2):
 	m = (r1 + r2) / 2
 	return m
 
+#NOTE: utilizes the rotation matrix function 
 #Courtesy of chatGPT
 def rotatePointsByAngle(points, origin, axis, angle_deg):
     """
@@ -329,3 +331,32 @@ def rotatePointsByAngle(points, origin, axis, angle_deg):
     rotated = shifted @ R.T
     # Translate back
     return rotated + origin
+
+def find_middle_of_longest_run(matches):
+	"""
+	Given a list of 0s and 1s, find the index of the middle element
+	of the longest continuous run of 1s.
+
+	If there are multiple equally long runs, the first is chosen.
+	If no 1s are present, returns None.
+	"""
+	best_start, best_len = -1, 0
+	current_start, current_len = -1, 0
+
+	for i, val in enumerate(matches):
+		if val == 1:
+			if current_len == 0:  # new run starts
+				current_start = i
+			current_len += 1
+			# update best run if current is longer
+			if current_len > best_len:
+				best_start, best_len = current_start, current_len
+		else:
+			current_len = 0  # reset on 0
+
+	if best_len == 0:
+		return None  # no runs at all
+
+	middle_index = best_start + best_len // 2
+	return middle_index
+
