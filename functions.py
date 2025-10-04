@@ -5,6 +5,10 @@ import math
 from collections import defaultdict
 import numpy as np
 import objects
+import random
+import string
+
+
 
 def getPandasDFfromDB(pathToDBfile):
 	#My friend Murat wrote these two lines, I have no idea what the squlite3 routine is doing
@@ -359,4 +363,14 @@ def find_middle_of_longest_run(matches):
 
 	middle_index = best_start + best_len // 2
 	return middle_index
+
+#Courtesy of chatGPT
+def random_filename(prefix='tmp', suffix=".xyz", length=8):
+	"""
+	Generate a random temporary filename with the given prefix and suffix.
+	Does not create the file; only returns a unique name.
+	"""
+	random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+	return f"{prefix}_{random_part}{suffix}"
+
 

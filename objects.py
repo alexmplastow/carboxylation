@@ -154,18 +154,23 @@ class xyzStructure:
 		file.write(self.xyzString)
 		file.close()
 
+
+	def _view_temp_xyz(self, viewer):
+		with tempfile.NamedTemporaryFile(prefix="view_", suffix=".xyz", delete=False) as tmp:
+			tmp.write(self.xyzString.encode("utf-8"))
+			tmp_path = tmp.name
+		try:
+			subprocess.run([viewer, tmp_path])
+		finally:
+			if os.path.exists(tmp_path):
+				os.remove(tmp_path)
+
 	def viewInVMD(self):
-		# Courtesy of chatGPT
-        	with tempfile.NamedTemporaryFile(delete=False, suffix=".xyz") as tmp:
-            		tmp.write(self.xyzString.encode("utf-8"))
-            		tmp_path = tmp.name
+		self._view_temp_xyz("vmd")
 
-        	try:
-            		subprocess.run(["vmd", tmp_path])
+	def viewInAvogadro(self):
+		self._view_temp_xyz("avogadro")
 
-        	finally:
-            		if os.path.exists(tmp_path):
-                		os.remove(tmp_path)
 
 	def returnAtomByIndex(self, i):
 		atomLines = []
@@ -273,12 +278,13 @@ class xyzStructure:
 		else:
 			print("You had to pick 1 or 2 as the input, was that so hard?")
 			raise Exception("Bruh")
-		
+
 		#TODO: MAKE SURE TO DELETE THIS FILE WHEN YOU ARE DONE
-		self.printToFile("tmp.xyz")
+		tmpFileName = functions.random_filename(prefix = 'tmp', suffix='.xyz')
+		self.printToFile(tmpFileName)
 
 
-		atoms = read("tmp.xyz")
+		atoms = read(tmpFileName)
 		cutoffs = natural_cutoffs(atoms)
 		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
 		nl.update(atoms)	
@@ -304,7 +310,7 @@ class xyzStructure:
 
 				else:
 					continue
-		os.remove("tmp.xyz")
+		os.remove(tmpFileName)
 
 
 		return R_indices
@@ -604,10 +610,12 @@ class xyzStructure:
 			
 		self.regenerateAtomLines(self.atoms)
 		#Printing to a temp file
-		self.printToFile('tmp.xyz')
-		atoms = read("tmp.xyz")
+
+		tmpFileName = functions.random_filename(prefix = 'tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
+		atoms = read(tmpFileName)
 		#Bad things happen if you don't remove this file immediately after creation
-		os.remove("tmp.xyz")
+		os.remove(tmpFileName)
 
 		cutoffs = natural_cutoffs(atoms)
 		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
@@ -640,10 +648,11 @@ class xyzStructure:
 		
 		self.regenerateAtomLines(self.atoms)
 		#Printing to a temp file
-		self.printToFile('tmp.xyz')
-		atoms = read("tmp.xyz")
+		tmpFileName = functions.random_filename(prefix = 'tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
+		atoms = read(tmpFileName)
 		#Bad things happen if you don't remove this file immediately after creation
-		os.remove("tmp.xyz")
+		os.remove(tmpFileName)
 
 		cutoffs = natural_cutoffs(atoms)
 		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
@@ -834,13 +843,14 @@ class xyzStructure:
 		#Atom indices will be included by default
 		self.addAtomIndices()
 		#Printing to a temp file
-		self.printToFile('tmp.xyz')
+		tmpFileName = functions.random_filename(prefix = 'tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
 		#Running the ASE environment
-		cutoffs = natural_cutoffs(read("tmp.xyz"))
+		cutoffs = natural_cutoffs(read(tmpFileName))
 		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
-		nl.update(read("tmp.xyz"))
+		nl.update(read(tmpFileName))
 		#Removing the file or shenanigans begin
-		os.remove('tmp.xyz')
+		os.remove(tmpFileName)
 
 		for atom in self.atoms:	
 			indices, _ = nl.get_neighbors(atom.index)
