@@ -9,11 +9,6 @@
 	#NOTE: I think it is fairly clear that I can solve the problem a little faster by working out
 	#NOTE: my own transformations instead of relying on Thang's code
 
-#TODO: I'd add a force field optimization for the coordinating group
-
-#TODO: Try an RDkit-based method for valence sanity checks
-	#TODO: *ASE
-
 #NOTE: at least one of the molecules optimized isn't sane, 16 looks like it has a double bonded hydrogen,
 	#NOTE: even before the molecule had a hydrogen added
 
@@ -335,6 +330,7 @@ class xyzStructure:
 			self.xyzString = self.atomCount + "\n" + "\n" + "\n".join(self.atomLines)
 		return Rgroup(R_indices, R_xyz, C_r)
 
+
 	#TODO: extend this to handle cases where the carboxylate has been added
 	def deleteRgroups(self, carboxylated = False):
 		if not carboxylated:
@@ -533,15 +529,18 @@ class xyzStructure:
 		R1_xyzString = "\n".join(R1_xyzLines)
 		R2_xyzString = "\n".join(R2_xyzLines)
 
-		
+		#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		#NOTE: I think this is the offending line
+		#NOTE: if R1_Cr and R2_Cr were not updated, well, my pooch is screwed
 		self.R1group = Rgroup(self.R1_indices, R1_xyzString, self.R1_Cr)
-		self.R2group = Rgroup(self.R2_indices, R2_xyzString, self.R2_Cr)
+		self.R2group = Rgroup(self.R2_indices, R2_xyzString, self.R1_Cr)
 
 		if deleteRgroups:
 			self.deleteRgroups(carboxylated = True)
 
 		return self.R1group, self.R2group
 
+	
 	def rotateR(self, R_index = 1, rotationAngle = 5):
 		R1, R2 = self.getCarboxylatedR1andR2s()
 
@@ -702,6 +701,20 @@ class xyzStructure:
 
 		return self.N1N2MetalCrossProduct
 
+	#NOTE: this is the dumbest name for a function I've come up with for a long time
+		#NOTE: I used vectors for N1 and N2 combined with vectors for C1 and O1
+		#NOTE: to get a flavor for how much rotating needs to be done for the five-ring
+		#NOTE: intermediate
+	def crossProductDebugForTetrahedralAndPlanarSolution(self):
+		C1O1_crossProduct = self.getC1O1_crossProduct()
+		N1N2_crossProduct = self.getN1N2_crossProduct()
+		r = self.metalAtom.r
+
+		C1O1vector = (r, r+C1O1_crossProduct)
+		N1N2vector = (r, r+N1N2_crossProduct)
+
+		return C1O1vector, N1N2vector
+
 	def findCrossProductAngles_ofPrimary_SP3(self):
 
 		#Grabbing the cross products
@@ -742,7 +755,8 @@ class xyzStructure:
 			raise Exception("You executed the code without constructing your intermediate")
 
 		
-		#I think I can avoid copying this data 
+		#I think I can avoid copying this data
+
 		scaffoldAtoms = [self.atoms[i] for i in self.scaffoldIndices]
 		
 		#I'm guessing the code will behave a litle more closely to expectation
@@ -770,15 +784,22 @@ class xyzStructure:
 	
 	#Note: seems sane
 	def forcePlanar(self):
+		
 		self.intermediateRotation()
+		#θ = self.findCrossProductAngles_ofPrimary_SP3()
+		#self.intermediateRotation(byAngle = True, angle = θ + 90)
+
+
 
 	#TODO: needs adjusted to handle radians
 	def forceTetrahedral(self):
 		#First forcing planar:
 		self.intermediateRotation()
 
+		angleInRadians = (90/180)*math.pi
+
 		#Then forcing 90°
-		self.intermediateRotation(byAngle = True, angle = 90)
+		self.intermediateRotation(byAngle = True, angle = angleInRadians)
 
 	def pivotIntermediate(self, angleInDegrees = 5):
 
@@ -856,8 +877,9 @@ class xyzStructure:
 			indices, _ = nl.get_neighbors(atom.index)
 			atom.neighborIndices = indices
 
+	
 	#TODO: battle test this function
-	def valenceSanityCheck(self):
+	def valenceSanityCheck(self, hydrogenSkip = False):
 		#You should access your variables with the MAX_VALENCE dictionary
 
 		self.addAtomNeighborNumberToAtoms()
@@ -877,11 +899,20 @@ class xyzStructure:
 		if self.valenceSanity == 'not sane':
 			for atom in self.atoms:
 				if atom.valenceSanity == 'not sane':
-					self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
+					if hydrogenSkip:
+						if atom.element != 'H':
+							self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
 							f"@ index {atom.index} has abnormal valence \n"
+					else:
+						self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
+						f"@ index {atom.index} has abnormal valence \n"
 
-		else:
-			self.valenceSanityRecord = ''
+
+
+			else:
+				self.valenceSanityRecord = ''
+				
+
 
 	#TODO: the structures being loaded into my sanity check don't seem to be updated
 
@@ -918,9 +949,9 @@ class xyzStructure:
 
 			rotationCount += angle
 		
-	def writeSanityRecord(self, sanityRecordPath):
+	def writeSanityRecord(self, sanityRecordPath, hydrogenSkip):
 		
-		self.valenceSanityCheck()
+		self.valenceSanityCheck(hydrogenSkip = hydrogenSkip)
 
 		if self.valenceSanityRecord == '':
 			return 0
@@ -1006,8 +1037,14 @@ class Rgroup:
             		if os.path.exists(tmp_path):
                 		os.remove(tmp_path)
 
+	def updateOrigin(self):
+
+		self.C_r = self.atoms[0].r
+		self.origin = self.atoms[0].r
 
 	def rotate(self, angleInDegrees = 5):
+		self.updateOrigin()
+
 		u_rot = self.getRgroupOrientation()
 		
 		P = np.array([atom.r for atom in self.atoms])
@@ -1018,6 +1055,8 @@ class Rgroup:
 			atom.r = p_r
 
 		self.regenerateAtomLines(self.atoms)
+
+			
 	
 
 			
