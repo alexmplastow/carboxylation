@@ -7,26 +7,123 @@ import numpy as np
 import objects
 import random
 import string
+import re
+import sqlite3
+import ast
 
+def getPandasDFfromDB_jsonFix(pathToDBfile):
 
+    conn = sqlite3.connect(pathToDBfile)
+    df = pd.read_sql("SELECT * FROM calculations", conn)
+    conn.close()
 
+    # Convert JSON strings in 'blob_data' column to dicts
+    df['blob_data'] = df['blob_data'].apply(json.loads)
+    return df
+
+'''
 def getPandasDFfromDB(pathToDBfile):
 	#My friend Murat wrote these two lines, I have no idea what the squlite3 routine is doing
 	conn = sqlite3.connect(pathToDBfile)
 	database_df = pd.read_sql("SELECT * FROM calculations", conn)
 	return database_df
+'''
+
+def getPandasDFfromDB(pathToDBfile):
+    conn = sqlite3.connect(pathToDBfile)
+    database_df = pd.read_sql("SELECT * FROM calculations", conn)
+
+    # Convert 'blob_data' strings to dictionaries
+    if 'blob_data' in database_df.columns:
+        def parse_blob(s):
+            if not isinstance(s, str):
+                return s
+            try:
+                return json.loads(s)
+            except json.JSONDecodeError:
+                try:
+                    return ast.literal_eval(s)
+                except Exception:
+                    return s  # fallback: leave as-is if parsing fails
+
+        database_df['blob_data'] = database_df['blob_data'].apply(parse_blob)
+
+    return database_df
 
 def getXYZstructureList(pathToDBfile):
+
 	df = getPandasDFfromDB(pathToDBfile)
 	optimized_xyz_list = []
+
 	for index, row in df.iterrows():
-		try:
-			blob_data_dict = json.loads(row['blob_data'])
-			optimized_xyz_list.append(blob_data_dict['opt_xyz'])
-		except (json.JSONDecodeError, KeyError) as  e:
-			print(f"Error processing row {index}: {e}")
-			optimized_xyz_list.append(None)
+		optimized_xyz_list.append(row['blob_data']['opt_xyz'])
 	return optimized_xyz_list
+
+def load_xyz_structures_from_file(filepath):
+    """
+    Reads a text file containing multiple XYZ structures concatenated together,
+    and returns a list of xyzStructure instances.
+    """
+    with open(filepath, "r") as f:
+        lines = [ln.rstrip() for ln in f if ln.strip()]
+
+    structures = []
+    i = 0
+    while i < len(lines):
+        try:
+            atom_count = int(lines[i])
+        except ValueError:
+            i += 1
+            continue  # skip non-count lines (like stray atoms or headers)
+
+        # Build the XYZ block: count + name + atom lines
+        block_end = i + 2 + atom_count
+        if block_end > len(lines):
+            break  # incomplete block at end of file
+
+        xyz_block = "\n".join(lines[i:block_end])
+        structures.append(objects.xyzStructure(xyz_block))
+        i = block_end  # move to next structure
+
+    return structures
+
+def getXYZandBuildingBlock_structureList(pathToDBfile, xyzFile, sanityCheck = False):
+	
+	df = getPandasDFfromDB(pathToDBfile)
+	xyzIndices = []
+	for i in df['blob_data']:
+		#I think this value is the corresponding structure
+		xyzIndex = int(i['unique_name'].split("_")[3])
+		xyzIndices.append(xyzIndex)
+
+	xyzInstances = load_xyz_structures_from_file(xyzFile)
+		
+
+	structureCodes = [xyzInstances[i_x].name_line for i_x in xyzIndices]
+
+	optimized_xyz_list = []
+	initial_xyz_list = []
+
+
+	for index, row in df.iterrows():
+		initial_xyz_list.append(row['blob_data']['initial_xyz'])
+		optimized_xyz_list.append(row['blob_data']['opt_xyz'])
+
+	if sanityCheck:
+		commonIndex = 0
+		#Checking the first XYZ instance from optimized XYZ
+		print("****************************")
+		print(initial_xyz_list[commonIndex])
+		print("///////////////////////////////")
+		print(xyzInstances[xyzIndices[commonIndex]].xyzString)
+		print("///////////////////////////////")
+		print(structureCodes[commonIndex])
+		print("****************************")
+		raise Exception("Stop here")
+
+
+	return optimized_xyz_list, structureCodes
+
 
 
 #Written by Murat (but probably by chatGPT or Gemini)
@@ -84,6 +181,7 @@ def parse_xyz(xyz_text):
 def dist(a, b):
     return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
 
+'''
 def bonded(sym_i, sym_j, d, scale=1.25, metal_fudge=0.20):
 	"""
 	Heuristic bond criterion:
@@ -92,6 +190,25 @@ def bonded(sym_i, sym_j, d, scale=1.25, metal_fudge=0.20):
 	base = scale * (rcov(sym_i) + rcov(sym_j))
 	extra = metal_fudge if (sym_i.lower() in ("ni",) or sym_j.lower() in ("ni",)) else 0.0
 	return d <= (base + extra)
+
+'''
+
+def bonded(sym_i, sym_j, d, scale=1.25, metal_fudge=0.20):
+    """
+    Heuristic bond criterion:
+      d <= scale * (r_i + r_j) + (metal_fudge if either is a metal like Ni)
+    Prevents H from bonding to metal centers.
+    """
+    # Ignore spurious Ni–H or other metal–H "bonds"
+    metals = {"ni", "fe", "cu", "co", "zn", "pd", "pt", "ru", "rh"}
+    if (sym_i.lower() in metals and sym_j.lower() == "h") or \
+       (sym_j.lower() in metals and sym_i.lower() == "h"):
+        return False
+
+    base = scale * (rcov(sym_i) + rcov(sym_j))
+    extra = metal_fudge if (sym_i.lower() in metals or sym_j.lower() in metals) else 0.0
+    return d <= (base + extra)
+
 
 COVALENT_RADII = {
     "H": 0.31, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57,
@@ -227,6 +344,7 @@ def rotate_points(points, origin, axis, angle_deg):
     return rotated + origin
 
 #NOTE: I think this function would be rather handy
+'''
 def reorient_points(points, origin, current_dir, target_dir):
     """
     Rotate a set of points so that `current_dir` aligns with `target_dir`.
@@ -285,6 +403,83 @@ def reorient_points(points, origin, current_dir, target_dir):
     transformed_points = rotated_points + origin
 
     return transformed_points
+'''
+
+def rotation_matrix(axis, angle):
+    """
+    Rodrigues' rotation formula for a 3D rotation matrix.
+    Ensures the axis is normalized for numerical stability.
+    """
+    axis = np.asarray(axis, dtype=float)
+    axis /= np.linalg.norm(axis)
+    K = np.array([
+        [0, -axis[2], axis[1]],
+        [axis[2], 0, -axis[0]],
+        [-axis[1], axis[0], 0]
+    ])
+    I = np.eye(3)
+    return I + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+
+def reorient_points(points, origin, current_dir, target_dir, debug=False, antiparallel_threshold=-0.90):
+    """
+    Rotate a set of 3D points so that `current_dir` aligns with `target_dir`.
+
+    Returns
+    -------
+    transformed_points : (N,3) ndarray
+        The rotated coordinates.
+    antiparallel_flag : bool
+        True if the vectors were nearly antiparallel (dot < threshold).
+    """
+    points = np.asarray(points, dtype=float)
+    origin = np.asarray(origin, dtype=float)
+    u = np.asarray(current_dir, dtype=float)
+    v = np.asarray(target_dir, dtype=float)
+
+    # === Normalize and check validity ===
+    nu, nv = np.linalg.norm(u), np.linalg.norm(v)
+    if nu < 1e-8 or nv < 1e-8:
+        raise ValueError(f"Zero-length direction vector(s): |u|={nu}, |v|={nv}")
+    u /= nu
+    v /= nv
+
+    dot = np.clip(np.dot(u, v), -1.0, 1.0)
+    cross = np.cross(u, v)
+    norm_cross = np.linalg.norm(cross)
+    angle = math.atan2(norm_cross, dot)
+
+    # === Antiparallel detection ===
+    antiparallel_flag = dot < antiparallel_threshold
+
+    if debug:
+        print("\n--- reorient_points diagnostics ---")
+        print(f"current_dir (u): {u}")
+        print(f"target_dir  (v): {v}")
+        print(f"dot(u,v): {dot:.6f}")
+        print(f"angle (deg): {math.degrees(angle):.6f}")
+        print(f"antiparallel_flag: {antiparallel_flag}")
+        print("------------------------------------")
+
+    # === Rotation matrix selection ===
+    if dot > 0.999999:
+        R = np.eye(3)  # nearly parallel
+    elif antiparallel_flag:
+        # placeholder stable rotation (π about orthogonal axis)
+        axis = np.cross(u, [1, 0, 0])
+        if np.linalg.norm(axis) < 1e-3:
+            axis = np.cross(u, [0, 1, 0])
+        axis /= np.linalg.norm(axis)
+        R = rotation_matrix(axis, np.pi)
+    else:
+        axis = cross / norm_cross
+        R = rotation_matrix(axis, angle)
+
+    # === Apply rotation ===
+    shifted = points - origin
+    rotated = shifted @ R.T
+    transformed = rotated + origin
+
+    return transformed, antiparallel_flag
 
 def findCentralPoint(points):
 	
@@ -372,5 +567,18 @@ def random_filename(prefix='tmp', suffix=".xyz", length=8):
 	"""
 	random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 	return f"{prefix}_{random_part}{suffix}"
+
+def extract_ligand_numbers(file_list):
+    """
+    Extract numeric indices from filenames like 'ligands_6180.xyz'.
+    Works even if some filenames omit the 'ligands_' prefix.
+    """
+    numbers = []
+    for f in file_list:
+        match = re.search(r"(\d+)\.xyz$", f)
+        if match:
+            numbers.append(int(match.group(1)))
+    return numbers
+
 
 
