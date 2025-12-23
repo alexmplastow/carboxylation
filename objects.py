@@ -29,6 +29,7 @@ import functions
 
 import tempfile
 import subprocess
+import shutil
 import os
 import numpy as np
 
@@ -36,11 +37,14 @@ import math
 
 from ase.io import read
 from ase.neighborlist import NeighborList, natural_cutoffs
+from ase.optimize import BFGS
+from ase.calculators.emt import EMT
 
 from rdkit.Chem.rdmolfiles import MolFromXYZFile
 from rdkit.Chem import rdmolops
 from rdkit.Chem import rdDetermineBonds
 from rdkit import Chem
+
 
 
 MAX_VALENCE = {
@@ -127,9 +131,58 @@ class xyzStructure:
 		self.xyzString = xyzString
 		lines = xyzString.split("\n")
 		self.atomCount = int(lines[0])
+		self.name_line = lines[1].strip() 
 		self.atomLines = [ln.strip() for ln in lines[2:] if ln.strip()]
 		self.atoms = [atom(atomLine) for atomLine in self.atomLines]
 
+	#XTB is fitted 
+	def geometryOptimization(self, fmax = 0.50):
+
+		from xtb.ase.calculator import XTB
+		from ase.optimize import BFGS
+
+		tmpFileName = functions.random_filename(prefix='tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
+
+		aseAtoms = read(tmpFileName)
+		aseAtoms.calc = XTB(method="GFN2-xTB")
+		optimizer = BFGS(aseAtoms)
+		optimizer.run(fmax= fmax)
+
+		optimizedAtoms = []
+
+		for aseAtom in aseAtoms:
+			element = aseAtom.symbol
+			x, y, z = aseAtom.position
+			atomString = f"{element} {x:.8f} {y:.8f} {z:.8f}"
+			atomInstance = atom(atomString)
+			optimizedAtoms.append(atomInstance)
+
+		self.regenerateAtomLines(optimizedAtoms)
+
+		'''
+		tmpFileName = functions.random_filename(prefix='tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
+		#NOTE: this is not an attribute
+		aseAtoms = read(tmpFileName)
+		aseAtoms.calc = EMT()
+		optimizer = BFGS(aseAtoms)
+		optimizer.run(fmax = 0.05)
+
+		optimizedAtoms = []
+
+		for aseAtom in aseAtoms:
+
+			element = aseAtom.symbol
+			r = aseAtom.position
+
+			atomString = f"{element} {r[0]} {r[1]} {r[2]}"
+			atomInstance = atom(atomString)
+
+			optimizedAtoms.append(atomInstance)
+
+		self.regenerateAtomLines(optimizedAtoms)
+		'''
 	
 	#NOTE: assumes the atoms attribute has been set correctly
 		#Fixes the xyz string while its at it
@@ -576,14 +629,28 @@ class xyzStructure:
 		self.regenerateAtomLines(self.atoms)
 
 	#TODO: flesh out this funciton an you'll be golden
-	def reduceRclashes(self, R_index=1, rotationAngle = 5):
+	def reduceRclashes(self, R_index = 1, rotationAngle = 5, debug = False, VMDdebug_type1 = False,
+				VMDdebug_type2 = False):
+
+		radianAngle = (math.pi/180)*rotationAngle
+
+		if VMDdebug_type2:
+			os.mkdir('./tmp')
 
 		valenceSanityMetrics = []
 		Θ = []
 		for θ in range(rotationAngle, 360 + rotationAngle, rotationAngle):
 			
 			self.valenceSanityCheck()
-			self.rotateR(R_index, rotationAngle)
+
+			
+			self.rotateR(R_index, radianAngle)
+
+			if VMDdebug_type1:
+				self.viewInVMD()
+			if VMDdebug_type2:
+				self.printToFile(f'./tmp/tmp_{θ}.xyz')
+				
 			
 			if self.valenceSanity == 'sane':
 				valenceSanityMetric = 0
@@ -596,15 +663,35 @@ class xyzStructure:
 
 		sanityMinimum = min(valenceSanityMetrics)
 
+		if debug:
+			print("........................................")
+			print(sanityMinimum)
+			print(f"valenceSanityMetrics array {valenceSanityMetrics}")
+			print("........................................")
+
+
+		if VMDdebug_type2:
+
+			subprocess.run(["vmd", "-e", os.path.abspath("loadAllXYZs.tcl")])
+			shutil.rmtree('./tmp')
+			
+		'''
 		for valenceSanityMetric, θ in zip(valenceSanityMetrics, Θ):
 			if valenceSanityMetric == sanityMinimum:
 				optimal_θ = θ + rotationAngle
+		'''
+		matches = [x == sanityMinimum for x in valenceSanityMetrics]
+
+		optimalIndex = functions.find_middle_of_longest_run(matches)
+		optimal_θ = optimalIndex * radianAngle 
+		
 
 		self.rotateR(R_index = R_index, rotationAngle = optimal_θ)
 
 
 	#NOTE: this is just a function for finding the oxygen and carbon nearest
 		#NOTE: to the nickel
+	'''
 	def getC1O1_atoms(self):
 			
 		self.regenerateAtomLines(self.atoms)
@@ -678,6 +765,118 @@ class xyzStructure:
 				break
 
 		return self.N1_atom, self.N2_atom
+	'''
+	#NOTE: this method was originally designed by yours truly, but I had chatGPT
+		#NOTE: design a fix for cases where a nearby hydrogen was registered
+		#NOTE: as one of the metal-coordinating atoms
+	def getC1O1_atoms(self):
+		# make sure strings/indices are in sync
+		self.regenerateAtomLines(self.atoms)
+
+		# temp file for ASE
+		tmpFileName = functions.random_filename(prefix='tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
+		atoms = read(tmpFileName)
+		os.remove(tmpFileName)
+
+		cutoffs = natural_cutoffs(atoms)
+		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
+		nl.update(atoms)
+
+		# add indices to our own atoms
+		self.addAtomIndices()
+
+		# find Ni
+		for atom in self.atoms:
+			if atom.element == 'Ni':
+				Ni_i = atom.index
+				self.metalAtom = atom
+				break
+		else:
+			raise ValueError("No Ni atom found in structure")
+
+		# raw neighbors from ASE (can contain H!)
+		neighbor_indices, _ = nl.get_neighbors(Ni_i)
+
+		# turn into real atoms
+		neighbor_atoms = [a for a in self.atoms if a.index in neighbor_indices]
+
+		# drop hydrogens that are too close to Ni
+		filtered = [a for a in neighbor_atoms if a.element != 'H']
+
+		# sort by distance to Ni so the 'closest real ones' win
+		def _dist_to_ni(a):
+			return float(np.linalg.norm(a.r - self.metalAtom.r))
+
+		filtered.sort(key=_dist_to_ni)
+
+		# now pick first C and first O from filtered list
+		C1_atom = None
+		O1_atom = None
+		for a in filtered:
+			if a.element == 'C' and C1_atom is None:
+				C1_atom = a
+			elif a.element == 'O' and O1_atom is None:
+				O1_atom = a
+			if C1_atom is not None and O1_atom is not None:
+				break
+
+		if C1_atom is None or O1_atom is None:
+			raise RuntimeError(
+				f"Could not find both C and O bound to Ni; got neighbors={[(a.element, a.index) for a in filtered]}"
+			)
+
+		self.C1_atom = C1_atom
+		self.O1_atom = O1_atom
+		return self.C1_atom, self.O1_atom
+
+
+	def getN1N2_atoms(self):
+		self.regenerateAtomLines(self.atoms)
+
+		tmpFileName = functions.random_filename(prefix='tmp', suffix=".xyz", length=8)
+		self.printToFile(tmpFileName)
+		atoms = read(tmpFileName)
+		os.remove(tmpFileName)
+
+		cutoffs = natural_cutoffs(atoms)
+		nl = NeighborList(cutoffs, self_interaction=False, bothways=True)
+		nl.update(atoms)
+
+		self.addAtomIndices()
+
+		# find Ni
+		for atom in self.atoms:
+			if atom.element == 'Ni':
+				Ni_i = atom.index
+				self.metalAtom = atom
+				break
+		else:
+			raise ValueError("No Ni atom found in structure")
+
+		neighbor_indices, _ = nl.get_neighbors(Ni_i)
+		neighbor_atoms = [a for a in self.atoms if a.index in neighbor_indices]
+
+		# drop H neighbors around the metal
+		neighbor_atoms = [a for a in neighbor_atoms if a.element != 'H']
+
+		# sort by distance to metal
+		def _dist_to_ni(a):
+			return float(np.linalg.norm(a.r - self.metalAtom.r))
+		neighbor_atoms.sort(key=_dist_to_ni)
+
+		# pick two N's
+		N_atoms = [a for a in neighbor_atoms if a.element == 'N']
+
+		if len(N_atoms) < 2:
+			raise RuntimeError(
+				f"Expected at least 2 N neighbors to Ni, got {[(a.element, a.index) for a in neighbor_atoms]}"
+			)
+
+		self.N1_atom = N_atoms[0]
+		self.N2_atom = N_atoms[1]
+		return self.N1_atom, self.N2_atom
+
 
 	def getC1O1_crossProduct(self):
 		
@@ -744,7 +943,7 @@ class xyzStructure:
 		return u_rot
 
 	#NOTE: Don't forget to regenerate your atom strings when you are done
-	def intermediateRotation(self, byAngle = False, angle = 0):
+	def intermediateRotation(self, byAngle = False, angle = 0, debug = False):
 		
 
 		u_rot = self.findMetalAxisOfRotation()
@@ -772,7 +971,30 @@ class xyzStructure:
 		if byAngle:
 			P_r = functions.rotatePointsByAngle(P, self.metalAtom.r, u_rot, angle)
 		else:
-			P_r = functions.reorient_points(P, self.metalAtom.r, self.C1O1MetalCrossProduct, self.N1N2MetalCrossProduct)
+			if debug:
+				print("/////////////////////////////////////")
+				print(f"Number of included atoms {len(P)}")
+				print("metal atom positions and cross products of central atoms")
+				print(f'self.metalAtom.r: {self.metalAtom.r}')
+				print(f'self.metalAtom.r + self.C1O1MetalCrossProduct'
+				f'{self.metalAtom.r + self.C1O1MetalCrossProduct}')
+				print(f'self.N1N2MetalCrossProduct {self.N1N2MetalCrossProduct}')
+				print(f'self.N1N2MetalCrossProduct + metalAtom.r'
+					f' {self.N1N2MetalCrossProduct + self.metalAtom.r}')
+				print("/////////////////////////////////////")
+
+	
+			P_r, antiparallelFlag = functions.reorient_points(P, self.metalAtom.r, self.C1O1MetalCrossProduct, self.N1N2MetalCrossProduct, debug = debug)
+
+			if antiparallelFlag:
+
+				if debug:
+					print("The antiparallel code executed")
+
+				P = functions.rotatePointsByAngle(P, self.metalAtom.r, u_rot, angle)
+				P_r, _ = functions.reorient_points(P, self.metalAtom.r, self.C1O1MetalCrossProduct, self.N1N2MetalCrossProduct, debug = debug)
+
+				
 
 
 		for atom, p_r in zip(scaffoldAtoms, P_r):
@@ -783,13 +1005,9 @@ class xyzStructure:
 		self.regenerateAtomLines(self.atoms)
 	
 	#Note: seems sane
-	def forcePlanar(self):
+	def forcePlanar(self, debug = False):
 		
-		self.intermediateRotation()
-		#θ = self.findCrossProductAngles_ofPrimary_SP3()
-		#self.intermediateRotation(byAngle = True, angle = θ + 90)
-
-
+		self.intermediateRotation(debug = debug)
 
 	#TODO: needs adjusted to handle radians
 	def forceTetrahedral(self):
@@ -807,7 +1025,7 @@ class xyzStructure:
 
 		self.intermediateRotation(byAngle = True, angle = angleInRadians)
 
-	#I do not mine the weight because I see no point
+	#I do not mind the weight because I see no point
 	def findCOMproxy(self):
 		
 		R = [atom.r for atom in self.atoms]
@@ -877,9 +1095,8 @@ class xyzStructure:
 			indices, _ = nl.get_neighbors(atom.index)
 			atom.neighborIndices = indices
 
-	
 	#TODO: battle test this function
-	def valenceSanityCheck(self, hydrogenSkip = False):
+	def valenceSanityCheck(self):
 		#You should access your variables with the MAX_VALENCE dictionary
 
 		self.addAtomNeighborNumberToAtoms()
@@ -887,10 +1104,11 @@ class xyzStructure:
 		#Innocent untilProven guilty
 		self.valenceSanity = 'sane'
 
+	
 		for atom in self.atoms:
 			if MAX_VALENCE[atom.element] < len(atom.neighborIndices):
-				atom.valenceSanity = 'not sane'
 				self.valenceSanity = 'not sane'
+				atom.valenceSanity = 'not sane'
 			else:
 				atom.valenceSanity = 'sane'
 
@@ -899,25 +1117,17 @@ class xyzStructure:
 		if self.valenceSanity == 'not sane':
 			for atom in self.atoms:
 				if atom.valenceSanity == 'not sane':
-					if hydrogenSkip:
-						if atom.element != 'H':
-							self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
+					self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
 							f"@ index {atom.index} has abnormal valence \n"
-					else:
-						self.valenceSanityRecord += f"Atom of element {atom.element}\n"\
-						f"@ index {atom.index} has abnormal valence \n"
 
-
-
-			else:
-				self.valenceSanityRecord = ''
-				
-
+		else:
+			self.valenceSanityRecord = ''
+			self.valenceSanity = 'not sane'
 
 	#TODO: the structures being loaded into my sanity check don't seem to be updated
 
 	
-	def pivotCorrectionForValenceSanity(self, angle=5, debug = False):
+	def pivotCorrectionForValenceSanity(self, rotationAngle=5, debug = False):
 
 		#This one already accepts angles in degrees
 		rotationCount = 0
@@ -925,33 +1135,57 @@ class xyzStructure:
 		# Ensure strings are in sync before we start
 		self.regenerateAtomLines(self.atoms)
 
-		while rotationCount < 360:
-			# 1) pivot first (updates atom.r; intermediateRotation ends with regenerate)
-			self.pivotIntermediate(angleInDegrees=angle)
+		valenceSanityMetrics = []
+		Θ = []
+		
 
-			# 2) regenerate strings (belt-and-suspenders)
+		for θ in range(rotationAngle, 360 + rotationAngle, rotationAngle):
+
+			# 1) pivot first (updates atom.r; intermediateRotation ends with regenerate)
+			self.pivotIntermediate(angleInDegrees=rotationAngle)
+			
+			# 2) I need to keep track of rotations in practice
+			rotationCount+=1
+
+			# 3) regenerate strings (belt-and-suspenders)
 			self.regenerateAtomLines(self.atoms)
 
-			# 3) re-check using the updated geometry
+			# 4) re-check using the updated geometry
 			self.valenceSanityCheck()
 			
-			# 4) if sane, we’re done; otherwise show the CURRENT (post-pivot) record
-			if self.valenceSanity == 'sane':
-				break
+			# 5) quantifying sanity
+			if self.valenceSanityRecord == '':
+				valenceSanityMetric = 0
+			
+			else:
+				valenceSanityMetric = len(self.valenceSanityRecord.split("\n"))/2
+				
+			#6) Adding the metrics right where I need it
+			valenceSanityMetrics.append(valenceSanityMetric)
+			Θ.append(θ)
+			
 			if debug == True:
 				print("********************************************")
-				print(rotationCount + angle)  # rotations applied so far
+				print(f'{rotationCount*rotationAngle} degrees')  # rotations applied
 				print(self.valenceSanityRecord)  # this now reflects post-pivot bonds
+				self.viewInAvogadro()
 				# OPTIONAL: visualize current geometry (post-pivot)
 				print("********************************************")
 
-				self.viewInVMD()
+		
+		sanityMinimum = min(valenceSanityMetrics)
 
-			rotationCount += angle
+		for i, valenceSanityMetric in enumerate(valenceSanityMetrics):
+			if valenceSanityMetric == sanityMinimum:
+				optimal_θ = rotationAngle*(i + 1)
+				break
 		
-	def writeSanityRecord(self, sanityRecordPath, hydrogenSkip):
+		self.pivotIntermediate(angleInDegrees=optimal_θ)
+			
+
+	def writeSanityRecord(self, sanityRecordPath):
 		
-		self.valenceSanityCheck(hydrogenSkip = hydrogenSkip)
+		self.valenceSanityCheck()
 
 		if self.valenceSanityRecord == '':
 			return 0
@@ -1003,7 +1237,7 @@ class Rgroup:
 		
 
 		#NOTE: I am worried these points are not getting updated
-		points_1 = functions.reorient_points(R_P, self.origin, R_u, newOrientation)
+		points_1, _ = functions.reorient_points(R_P, self.origin, R_u, newOrientation)
 		for atom, point in zip(self.atoms, points_1):
 			atom.r = point
 			atom.updateString()
